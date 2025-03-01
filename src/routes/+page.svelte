@@ -1,5 +1,13 @@
 <script lang="ts">
-    import type { PageProps } from './$types';
+	import type { PageProps } from './$types';
+	const qualities = [
+		'highest',
+		'lowest',
+		'highestaudio',
+		'lowestaudio',
+		'highestvideo',
+		'lowestvideo'
+	];
 
 	type VideoDetails = {
 		title: string;
@@ -8,21 +16,20 @@
 		thumbnails: Array<{ url: string }>;
 	};
 
-    
-    
 	let { data }: PageProps = $props();
-    
-	type SearchVideoData = typeof data;
+	let quality = $state('highest');
 
-	let query = $state('https://www.youtube.com/watch?v=1VQZTFyvcqc');
-	let searchVideoData: SearchVideoData = $state(data);
+	type SearchVideoData = typeof data | undefined;
 
-    $effect(() => {
-        console.log('searchVideoData:', searchVideoData);
-    });
+	let query = $state('https://www.youtube.com/watch?v=jxIzy3gWR1U');
+	let searchVideoData: SearchVideoData = $state(undefined);
+
+	$effect(() => {
+		console.log('searchVideoData:', searchVideoData);
+	});
 
 	async function findVideo(query: string) {
-		const response = await fetch(`/api/search?url=${encodeURIComponent(query)}`);
+		const response = await fetch(`/api/download?url=${encodeURIComponent(query)}&quality=${quality}`);
 		const data = await response.json();
 		if (response.ok) {
 			console.log('Download started:', data);
@@ -30,7 +37,17 @@
 			console.log(searchVideoData);
 		} else {
 			console.error('Error starting download:', data);
-			searchVideoData = { videoDetails: undefined };
+		}
+	}
+
+	async function downloadVideo(query: string, quality: string) {
+		const response = await fetch(`/api/download?url=${encodeURIComponent(query)}&quality=${quality}`,
+			{ method: 'POST' });
+		const data = await response.json();
+		if (response.ok) {
+			console.log('Download started:', data);
+		} else {
+			console.error('Error starting download:', data);
 		}
 	}
 </script>
@@ -41,7 +58,7 @@
 </section>
 
 <section id="search-result">
-	{#if searchVideoData.videoDetails !== undefined}
+	{#if searchVideoData?.videoDetails !== undefined}
 		<article>
 			<img src={searchVideoData.videoDetails.thumbnails[0].url} alt="thumbnail" />
 			<div id="info">
@@ -49,12 +66,14 @@
 				<p id="lengthSeconds">{searchVideoData.videoDetails.lengthSeconds}</p>
 				<p id="description">{searchVideoData.videoDetails.description.substring(0, 150)}</p>
 				<div id="actions">
-					<select>
-						{#each searchVideoData.formats as format}
-							<option value={format.itag}>{format.mimeType}</option>
+					<select bind:value={quality}>
+						{#each qualities as q}
+							<option value={q}>{q}</option>
 						{/each}
 					</select>
-					<button id="download"> Download </button>
+					<button id="download"
+						on:click={() => downloadVideo(query, quality)}
+					> Download </button>
 				</div>
 			</div>
 		</article>
