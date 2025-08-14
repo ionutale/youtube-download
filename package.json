@@ -14,7 +14,6 @@
 		"lint": "prettier --check . && eslint ."
 	},
 	"dependencies": {
-		"svelte-sonner": "^1.0.5",
 		"ws": "^8.18.3",
 		"ytdl-core": "npm:@distube/ytdl-core@^4.16.4"
 	},
