@@ -1,12 +1,14 @@
 <script lang="ts">
+	import "../app.css";
+	
 	import type { PageProps } from './$types';
 	const qualities = [
-		'highest',
-		'lowest',
-		'highestaudio',
-		'lowestaudio',
-		'highestvideo',
-		'lowestvideo'
+		{ value: 'highest', description: 'Highest quality (video and audio)' },
+		{ value: 'lowest', description: 'Lowest quality (video and audio)' },
+		{ value: 'highestaudio', description: 'Highest quality audio' },
+		{ value: 'lowestaudio', description: 'Lowest quality audio' },
+		{ value: 'highestvideo', description: 'Highest quality video' },
+		{ value: 'lowestvideo', description: 'Lowest quality video' }
 	];
 
 	type VideoDetails = {
@@ -68,7 +70,7 @@
 				<div id="actions">
 					<select bind:value={quality}>
 						{#each qualities as q}
-							<option value={q}>{q}</option>
+							<option value={q.value}>{q.description}</option>
 						{/each}
 					</select>
 					<button id="download"
