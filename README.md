@@ -1,6 +1,6 @@
-# sv
+# YouTube Downloader (SvelteKit)
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A simple YouTube downloader with progress streaming, history, and file serving.
 
 ## Creating a project
 
@@ -16,13 +16,23 @@ npx sv create my-app
 
 ## Developing
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Install deps and run dev server:
 
 ```bash
-npm run dev
+pnpm install
+pnpm run dev
+```
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+## Environment
+
+Copy `.env.example` to `.env` and adjust as needed:
+
+```
+DOWNLOAD_DIR=download
+MAX_CONCURRENCY=2
+PROGRESS_INTERVAL_MS=200
+DEFAULT_QUALITY=highest
+DEFAULT_FORMAT=mp4
 ```
 
 ## Building
@@ -35,4 +45,13 @@ npm run build
 
 You can preview the production build with `npm run preview`.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## API and Routes
+
+- `POST /api/download?url=<u>&quality=<q>&format=<mp3|mp4>` — start download
+- `GET /api/download?url=<u>&quality=<q>` — fetch video info
+- `GET /api/events` — Server-Sent Events for progress updates
+- `GET /api/history` — list downloaded items
+- `DELETE /api/history?rel=<relative>` — delete an item by relative path
+- `GET /files/<relative>` — serve downloaded file with range support
+
+> For deployment, install a SvelteKit adapter, e.g. `@sveltejs/adapter-node`.
