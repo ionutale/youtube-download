@@ -49,6 +49,26 @@ pnpm install
 pnpm rebuild better-sqlite3
 ```
 
+### Docker
+
+Build and run locally:
+
+```bash
+docker compose up --build
+# then open http://localhost:3000
+```
+
+Manual build/run without compose:
+
+```bash
+docker build -t youtube-download .
+docker run --rm -p 3000:3000 -e DOWNLOAD_DIR=/data -v "$PWD/download":/data youtube-download
+```
+
+Notes:
+- Image uses Node 22 Alpine and the Node adapter. The app listens on `0.0.0.0:3000`.
+- The `download/` directory is mounted to `/data` for persistence, and SQLite DB is stored there.
+
 ## Environment
 
 Copy `.env.example` to `.env` and adjust as needed:

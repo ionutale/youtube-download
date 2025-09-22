@@ -3,8 +3,13 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 /** @type {import('@sveltejs/kit').Config} */
 let adapter;
 try {
-	const mod = await import('@sveltejs/adapter-auto');
-	adapter = mod.default();
+	if (process.env.SVELTE_ADAPTER === 'node') {
+		const mod = await import('@sveltejs/adapter-node');
+		adapter = mod.default();
+	} else {
+		const mod = await import('@sveltejs/adapter-auto');
+		adapter = mod.default();
+	}
 } catch {
 	adapter = undefined;
 }

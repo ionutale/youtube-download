@@ -1,0 +1,21 @@
+version: '3.9'
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - NODE_VERSION=22-alpine
+    image: youtube-download:latest
+    container_name: youtube-download
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - SVELTE_ADAPTER=node
+      - DOWNLOAD_DIR=/data
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./download:/data
+    restart: unless-stopped
