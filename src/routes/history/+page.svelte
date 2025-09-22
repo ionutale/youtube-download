@@ -29,7 +29,7 @@
 				<h2 class="card-title">{video.title}</h2>
 				<div class="card-actions justify-end">
 					<a href={video.path} download class="btn btn-primary">Download</a>
-					<button class="btn btn-secondary" on:click={() => remove(video.path)}>Remove</button>
+					<button class="btn btn-secondary" onclick={() => remove(video.path)}>Remove</button>
 				</div>
 			</div>
 		</div>

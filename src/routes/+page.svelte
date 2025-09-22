@@ -147,7 +147,7 @@
 			<option value="highestvideo">Highest video</option>
 			<option value="lowestvideo">Lowest video</option>
 		</select>
-		<button class="btn btn-square" on:click={search} disabled={loading}>
+		<button class="btn btn-square" onclick={search} disabled={loading}>
 			<svg
 				xmlns="http://www.w3.org/2000/svg"
 				class="h-6 w-6"

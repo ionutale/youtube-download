@@ -24,7 +24,7 @@
 			<a href="/history" class="btn btn-ghost normal-case">History</a>
 		</div>
 		<div class="flex-none">
-			<button class="btn btn-square btn-ghost" on:click={toggleTheme}>
+			<button class="btn btn-square btn-ghost" onclick={toggleTheme} aria-label="Toggle theme">
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
 					fill="none"
