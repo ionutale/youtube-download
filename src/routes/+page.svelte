@@ -59,9 +59,10 @@
 	let url = '';
 	let loading = false;
 	let video: {
-		title: string;
-		thumbnail: string;
-		path: string;
+		id?: string;
+		title?: string;
+		thumbnail?: string;
+		path?: string;
 	} | null = null;
 	let progress = 0;
 	import type { DownloadItem } from '$lib/types';
@@ -100,8 +101,8 @@
 			});
 			const data = await response.json();
 			if (response.ok) {
-				video = data;
-				toast.success('Download started');
+				video = { id: data.id };
+				toast.success('Download queued');
 			} else {
 				toast.error(data?.error || 'Failed to start download');
 			}
@@ -173,6 +174,9 @@
 					<th>Title</th>
 					<th>Progress</th>
 					<th>Status</th>
+					<th>Speed</th>
+					<th>ETA</th>
+					<th>Actions</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -182,6 +186,13 @@
 						<td>{download.title}</td>
 						<td><progress class="progress progress-primary" value={download.progress} max="100"></progress></td>
 						<td>{download.status}</td>
+						<td>{download.speedBps ? Math.round(download.speedBps/1024) + ' KB/s' : '-'}</td>
+						<td>{download.etaSeconds ? download.etaSeconds + 's' : '-'}</td>
+						<td class="space-x-2">
+							<button class="btn btn-xs" aria-label="Pause" onclick={() => fetch(`/api/download/${download.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause' }) })}>Pause</button>
+							<button class="btn btn-xs" aria-label="Resume" onclick={() => fetch(`/api/download/${download.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resume' }) })}>Resume</button>
+							<button class="btn btn-xs btn-error" aria-label="Cancel" onclick={() => fetch(`/api/download/${download.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel' }) })}>Cancel</button>
+						</td>
 					</tr>
 				{/each}
 			</tbody>

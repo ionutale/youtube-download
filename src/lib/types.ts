@@ -19,6 +19,8 @@ export type DownloadItem = {
 	title?: string;
 	progress?: number;
 	status: 'queued' | 'downloading' | 'completed' | 'failed' | 'canceled';
+	speedBps?: number;
+	etaSeconds?: number;
 };
 
 export type HistoryEntry = {
