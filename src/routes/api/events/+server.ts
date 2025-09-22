@@ -6,6 +6,7 @@ export const GET: RequestHandler = async (event) => {
   let listener: ((evt: any) => void) | undefined;
   let abortHandler: (() => void) | undefined;
 
+    console.log('[GET /api/events] client connected');
   const stream = new ReadableStream<string>({
     start(controller) {
       const send = (data: any) => {
@@ -41,6 +42,7 @@ export const GET: RequestHandler = async (event) => {
       if (heartbeat) clearInterval(heartbeat);
       if (listener) downloadsManager.off('event', listener);
       if (abortHandler) event.request.signal.removeEventListener('abort', abortHandler);
+        console.log('[GET /api/events] client disconnected');
     }
   });
 

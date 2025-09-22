@@ -17,7 +17,16 @@ function rateLimit(ip: string) {
 
 export const handle: Handle = async ({ event, resolve }) => {
   const method = event.request.method.toUpperCase();
-  const ip = event.getClientAddress?.() || 'unknown';
+  let ip = 'unknown';
+  try {
+    // getClientAddress may throw in Vite dev; guard it
+    ip = event.getClientAddress?.() || 'unknown';
+  } catch {}
+
+  // Minimal request log for debugging
+  try {
+    console.log('[request]', method, event.url.pathname, 'ip=', ip);
+  } catch {}
 
   if (['POST', 'PATCH', 'DELETE'].includes(method)) {
     // Same-origin/CSRF check for browsers: require Origin to match host if present

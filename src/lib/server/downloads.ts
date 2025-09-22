@@ -5,8 +5,20 @@ import fs from 'fs';
 import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR, MAX_CONCURRENCY } from './config';
 import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload } from './db';
 import ffmpegPath from 'ffmpeg-static';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import ytdl from './ytdl';
+
+// Resolve ffmpeg path: prefer ffmpeg-static, else system ffmpeg from PATH
+let RESOLVED_FFMPEG: string | null = null;
+try {
+  const staticPath = (ffmpegPath || null) as string | null;
+  if (staticPath && fs.existsSync(staticPath)) {
+    RESOLVED_FFMPEG = staticPath;
+  } else {
+    const res = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+    if (res.status === 0) RESOLVED_FFMPEG = 'ffmpeg';
+  }
+} catch {}
 
 export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
 
@@ -55,8 +67,9 @@ class DownloadsManager extends EventEmitter {
   if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
     const th = path.join(DOWNLOAD_DIR, 'thumbnails');
     if (!fs.existsSync(th)) fs.mkdirSync(th, { recursive: true });
-  try { dbMigrateFromLegacy(); } catch {}
+  try { dbMigrateFromLegacy(); console.log('[downloads] migration complete'); } catch (e) { console.warn('[downloads] migration error', e); }
   this.loadState();
+  console.log('[downloads] loaded %d items from persistence', this.items.size);
     // requeue items that were in progress
     for (const rec of this.items.values()) {
       if (rec.status === 'queued' || rec.status === 'downloading' || rec.status === 'paused') {
@@ -78,6 +91,7 @@ class DownloadsManager extends EventEmitter {
   enqueue(input: { url: string; format?: 'mp3' | 'mp4'; quality?: string }): DownloadRecord {
     const id = crypto.randomUUID();
     const now = Date.now();
+    console.log('[downloads] enqueue id=%s url=%s format=%s quality=%s', id, input.url, input.format || DEFAULT_FORMAT, input.quality || DEFAULT_QUALITY);
     const rec: DownloadRecord = {
       id,
       url: input.url,
@@ -129,6 +143,7 @@ class DownloadsManager extends EventEmitter {
     if (!rec) return;
     this.running++;
     try {
+      console.log('[downloads] run start id=%s', id);
       this.update(id, { status: 'downloading' });
       const info = await (ytdl.getInfo ? ytdl.getInfo(rec.url) : (ytdl as any).getInfo(rec.url));
       const title = info.videoDetails.title as string;
@@ -142,17 +157,37 @@ class DownloadsManager extends EventEmitter {
       this.update(id, { title, filename: path.basename(absPath), filePath: absPath, relPath, thumbnail: thumbLocal || thumbnails?.[0]?.url });
 
       const chosen = (ytdl.chooseFormat ? ytdl.chooseFormat(info.formats, { quality: rec.quality }) : (ytdl as any).chooseFormat(info.formats, { quality: rec.quality }));
+  console.log('[downloads] chosen format id=%s itag=%s hasVideo=%s hasAudio=%s isHLS=%s isDash=%s', id, (chosen as any)?.itag, (chosen as any)?.hasVideo, (chosen as any)?.hasAudio, (chosen as any)?.isHLS, (chosen as any)?.isDashMPD);
       const hasVideo = !!chosen.hasVideo;
       const hasAudio = !!chosen.hasAudio;
       const progressive = hasVideo && hasAudio && chosen.isHLS === false && chosen.isDashMPD === false;
+      let effective = chosen as any;
+      // If we need mux but ffmpeg is missing, try to find a progressive MP4 fallback
+  const ff = RESOLVED_FFMPEG;
+  const ffmpegExists = !!ff;
+      if (rec.format === 'mp4' && !progressive && !ffmpegExists) {
+        const formats = (ytdl.filterFormats ? ytdl.filterFormats(info.formats, 'audioandvideo') : info.formats.filter((f: any) => f.hasVideo && f.hasAudio && !f.isHLS && !f.isDashMPD)) as any[];
+        // Prefer mp4 container
+        const mp4s = formats.filter((f: any) => (f.container || f.mimeType || '').toString().includes('mp4'));
+        // Choose highest quality among progressive mp4s (fallback)
+        const fallback = mp4s[0] || formats[0];
+        if (fallback) {
+          effective = fallback;
+          console.warn('[downloads] using progressive MP4 fallback itag=%s', (fallback as any)?.itag);
+        } else {
+          console.error('[downloads] no progressive MP4 available and ffmpeg missing; cannot proceed');
+        }
+      }
 
-      const file = fs.createWriteStream(tempPath);
-      let stream: any;
-      if (rec.format === 'mp4' && !progressive && ffmpegPath) {
+  console.log('[downloads] paths id=%s abs=%s tmp=%s', id, absPath, tempPath);
+  let stream: any;
+  let writeFile: fs.WriteStream | undefined;
+      if (rec.format === 'mp4' && !progressive && ffmpegExists) {
+        console.log('[downloads] muxing via ffmpeg at %s', ff);
         // Mux separate streams using ffmpeg
         const video = ytdl(rec.url, { quality: 'highestvideo' });
         const audio = ytdl(rec.url, { quality: 'highestaudio' });
-        const proc = spawn(ffmpegPath, [
+        const proc: any = spawn(ff, [
           '-y',
           '-i', 'pipe:3',
           '-i', 'pipe:4',
@@ -166,20 +201,44 @@ class DownloadsManager extends EventEmitter {
         (audio as any).pipe(proc.stdio[4]);
         stream = proc;
         await new Promise<void>((resolve, reject) => {
-          proc.on('error', reject);
-          proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('ffmpeg mux exit ' + code))));
+          proc.on('error', (err: any) => {
+            console.error('[downloads] ffmpeg mux error id=%s:', id, err);
+            reject(err);
+          });
+          proc.on('close', (code: number) => (code === 0 ? resolve() : reject(new Error('ffmpeg mux exit ' + code))));
         });
       } else {
-        // Progressive or mp3 flow (mp3 handled later)
-        stream = ytdl(rec.url, { format: chosen });
-        await new Promise<void>((resolve, reject) => {
-          stream.on('error', reject);
-          file.on('error', reject);
-          file.on('finish', resolve);
-          stream.pipe(file);
-        });
+        if (rec.format === 'mp4' && !progressive && !ffmpegExists) {
+          console.warn('[downloads] ffmpeg not found; falling back to progressive stream attempt');
+        }
+        const tryOnce = async () => {
+          if (fs.existsSync(tempPath)) {
+            try { fs.unlinkSync(tempPath); } catch {}
+          }
+          const file = fs.createWriteStream(tempPath);
+          writeFile = file;
+          // Progressive or mp3 flow (mp3 handled later)
+          stream = ytdl(rec.url, { format: effective });
+          stream.on?.('error', (err: any) => console.error('[downloads] ytdl stream error id=%s:', id, err));
+          await new Promise<void>((resolve, reject) => {
+            stream.on('error', reject);
+            file.on('error', reject);
+            file.on('finish', resolve);
+            stream.pipe(file);
+          });
+        };
+        try {
+          await tryOnce();
+        } catch (err: any) {
+          if ((err?.code === 'ECONNRESET' || /aborted/i.test(String(err?.message || ''))) ) {
+            console.warn('[downloads] retry after transient error id=%s', id);
+            await tryOnce();
+          } else {
+            throw err;
+          }
+        }
       }
-      this.ctrls.set(id, { stream, file, tempPath });
+  this.ctrls.set(id, { stream, file: writeFile, tempPath });
 
       let lastTime = Date.now();
       let lastBytes = 0;
@@ -197,12 +256,16 @@ class DownloadsManager extends EventEmitter {
         this.update(id, { progress: pct, size: total, downloaded, speedBps: Math.round(speed), etaSeconds: eta });
       });
 
-      if (rec.format === 'mp3' && ffmpegPath) {
+      if (rec.format === 'mp3' && ffmpegExists) {
+        console.log('[downloads] converting to mp3 via ffmpeg at %s', ff);
         const mp3Path = absPath;
-        const proc = spawn(ffmpegPath, ['-y', '-i', tempPath, '-vn', '-acodec', 'libmp3lame', mp3Path]);
+        const proc: any = spawn(ff, ['-y', '-i', tempPath, '-vn', '-acodec', 'libmp3lame', mp3Path]);
         await new Promise<void>((resolve, reject) => {
-          proc.on('error', reject);
-          proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code))));
+          proc.on('error', (err: any) => {
+            console.error('[downloads] ffmpeg mp3 error id=%s:', id, err);
+            reject(err);
+          });
+          proc.on('close', (code: number) => (code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code))));
         });
         fs.unlinkSync(tempPath);
       } else {
@@ -213,14 +276,16 @@ class DownloadsManager extends EventEmitter {
       this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
     } catch (e: any) {
       const msg = e?.message || String(e);
+      console.error('[downloads] run error id=%s:', id, e);
       this.update(id, { status: 'failed', error: msg });
     } finally {
       const c = this.ctrls.get(id);
       if (c?.tempPath && fs.existsSync(c.tempPath) && this.items.get(id)?.status !== 'completed') {
-        try { fs.unlinkSync(c.tempPath); } catch {}
+        try { fs.unlinkSync(c.tempPath); } catch (e) { console.warn('[downloads] cleanup temp error id=%s:', id, e); }
       }
       this.ctrls.delete(id);
       this.running--;
+      console.log('[downloads] run end id=%s running=%d queued=%d', id, this.running, this.queue.length);
       this.maybeRunNext();
     }
   }
