@@ -67,6 +67,8 @@
 	let progress = 0;
 	import type { DownloadItem } from '$lib/types';
 	let downloads = $state<DownloadItem[]>([]);
+	let sortBy: 'createdAt' | 'progress' = $state('createdAt');
+	let filterBy: 'all' | 'active' | 'completed' | 'failed' = $state('all');
 
 	onMount(() => {
 		const es = new EventSource('/api/events');
@@ -88,6 +90,21 @@
 		es.onerror = () => {
 			console.error('SSE disconnected');
 		};
+	});
+
+	const visible = $derived.by(() => {
+		return downloads
+			.filter((d) => {
+				if (filterBy === 'active') return d.status === 'queued' || d.status === 'downloading' || d.status === 'paused';
+				if (filterBy === 'completed') return d.status === 'completed';
+				if (filterBy === 'failed') return d.status === 'failed';
+				return true;
+			})
+			.sort((a, b) => {
+				if (sortBy === 'progress') return (b.progress || 0) - (a.progress || 0);
+				if (sortBy === 'createdAt') return (b.createdAt || 0) - (a.createdAt || 0);
+				return 0;
+			});
 	});
 
 	async function search() {
@@ -148,11 +165,27 @@
 	</div>
 </div>
 
+<div class="mt-4 flex items-center gap-2">
+	<label>Filter</label>
+	<select class="select select-bordered select-xs" bind:value={filterBy}>
+		<option value="all">All</option>
+		<option value="active">Active</option>
+		<option value="completed">Completed</option>
+		<option value="failed">Failed</option>
+	</select>
+	<label>Sort</label>
+	<select class="select select-bordered select-xs" bind:value={sortBy}>
+		<option value="createdAt">Created</option>
+		<option value="progress">Progress</option>
+	</select>
+	<span class="text-sm opacity-70">{visible.length} shown</span>
+  </div>
+
 {#if loading}
 	<progress class="progress progress-primary mt-4 w-full" value={progress} max="100"></progress>
 {/if}
 
-{#if video}
+{#if video?.path}
 	<div class="card lg:card-side bg-base-100 shadow-xl mt-4">
 		<figure><img src={video.thumbnail} alt={video.title} /></figure>
 		<div class="card-body">
@@ -166,6 +199,11 @@
 
 <div class="mt-8">
 	<h2 class="text-2xl font-bold">Concurrent Downloads</h2>
+	{#if visible.length === 0}
+		<div class="mt-4 alert">
+			<span>No downloads yet. Paste a YouTube link above to start one.</span>
+		</div>
+	{/if}
 	<div class="overflow-x-auto">
 		<table class="table w-full">
 			<thead>
@@ -180,7 +218,7 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each downloads as download, i}
+				{#each visible as download, i}
 					<tr>
 						<th>{i + 1}</th>
 						<td>{download.title}</td>
@@ -192,6 +230,7 @@
 							<button class="btn btn-xs" aria-label="Pause" onclick={() => fetch(`/api/download/${download.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause' }) })}>Pause</button>
 							<button class="btn btn-xs" aria-label="Resume" onclick={() => fetch(`/api/download/${download.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resume' }) })}>Resume</button>
 							<button class="btn btn-xs btn-error" aria-label="Cancel" onclick={() => fetch(`/api/download/${download.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel' }) })}>Cancel</button>
+							<button class="btn btn-xs btn-primary" aria-label="Retry" onclick={() => fetch(`/api/download/${download.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retry' }) })}>Retry</button>
 						</td>
 					</tr>
 				{/each}

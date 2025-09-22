@@ -47,12 +47,23 @@ class DownloadsManager extends EventEmitter {
   private ctrls: Map<string, Controller> = new Map();
   private queue: string[] = [];
   private running = 0;
+  private dbPath = path.join(DOWNLOAD_DIR, 'downloads.json');
+  private saveTimer?: NodeJS.Timeout;
 
   constructor() {
     super();
     if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
     const th = path.join(DOWNLOAD_DIR, 'thumbnails');
     if (!fs.existsSync(th)) fs.mkdirSync(th, { recursive: true });
+    this.loadState();
+    // requeue items that were in progress
+    for (const rec of this.items.values()) {
+      if (rec.status === 'queued' || rec.status === 'downloading' || rec.status === 'paused') {
+        rec.status = 'queued';
+        this.queue.push(rec.id);
+      }
+    }
+    this.maybeRunNext();
   }
 
   list(): DownloadRecord[] {
@@ -89,6 +100,7 @@ class DownloadsManager extends EventEmitter {
     const updated = { ...current, ...patch, updatedAt: Date.now() } as DownloadRecord;
     this.items.set(id, updated);
     this.emit('event', { type: 'update', download: updated } satisfies DownloadEvent);
+    this.saveStateDebounced();
     return updated;
   }
 
@@ -128,9 +140,44 @@ class DownloadsManager extends EventEmitter {
       const thumbLocal = await this.cacheThumbnail(title, thumbnails?.[0]?.url);
       this.update(id, { title, filename: path.basename(absPath), filePath: absPath, relPath, thumbnail: thumbLocal || thumbnails?.[0]?.url });
 
-  const chosen = (ytdl.chooseFormat ? ytdl.chooseFormat(info.formats, { quality: rec.quality }) : (ytdl as any).chooseFormat(info.formats, { quality: rec.quality }));
-  const stream = ytdl(rec.url, { format: chosen });
-  const file = fs.createWriteStream(tempPath);
+      const chosen = (ytdl.chooseFormat ? ytdl.chooseFormat(info.formats, { quality: rec.quality }) : (ytdl as any).chooseFormat(info.formats, { quality: rec.quality }));
+      const hasVideo = !!chosen.hasVideo;
+      const hasAudio = !!chosen.hasAudio;
+      const progressive = hasVideo && hasAudio && chosen.isHLS === false && chosen.isDashMPD === false;
+
+      const file = fs.createWriteStream(tempPath);
+      let stream: any;
+      if (rec.format === 'mp4' && !progressive && ffmpegPath) {
+        // Mux separate streams using ffmpeg
+        const video = ytdl(rec.url, { quality: 'highestvideo' });
+        const audio = ytdl(rec.url, { quality: 'highestaudio' });
+        const proc = spawn(ffmpegPath, [
+          '-y',
+          '-i', 'pipe:3',
+          '-i', 'pipe:4',
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-movflags', '+faststart',
+          tempPath
+        ], { stdio: ['ignore', 'inherit', 'inherit', 'pipe', 'pipe'] });
+        // Pipe the two streams to ffmpeg
+        (video as any).pipe(proc.stdio[3]);
+        (audio as any).pipe(proc.stdio[4]);
+        stream = proc;
+        await new Promise<void>((resolve, reject) => {
+          proc.on('error', reject);
+          proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('ffmpeg mux exit ' + code))));
+        });
+      } else {
+        // Progressive or mp3 flow (mp3 handled later)
+        stream = ytdl(rec.url, { format: chosen });
+        await new Promise<void>((resolve, reject) => {
+          stream.on('error', reject);
+          file.on('error', reject);
+          file.on('finish', resolve);
+          stream.pipe(file);
+        });
+      }
       this.ctrls.set(id, { stream, file, tempPath });
 
       let lastTime = Date.now();
@@ -147,13 +194,6 @@ class DownloadsManager extends EventEmitter {
         lastBytes = downloaded;
         const pct = total ? Math.round((downloaded / total) * 100) : 0;
         this.update(id, { progress: pct, size: total, downloaded, speedBps: Math.round(speed), etaSeconds: eta });
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        stream.on('error', reject);
-        file.on('error', reject);
-        file.on('finish', resolve);
-        stream.pipe(file);
       });
 
       if (rec.format === 'mp3' && ffmpegPath) {
@@ -189,6 +229,32 @@ class DownloadsManager extends EventEmitter {
       const next = this.queue.shift();
       if (next) this.run(next);
     }
+  }
+
+  private saveStateDebounced() {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => this.saveState(), 100);
+  }
+
+  private saveState() {
+    try {
+      const data = Array.from(this.items.values());
+      fs.writeFileSync(this.dbPath, JSON.stringify(data));
+    } catch {}
+  }
+
+  private loadState() {
+    try {
+      if (!fs.existsSync(this.dbPath)) return;
+      const arr = JSON.parse(fs.readFileSync(this.dbPath, 'utf-8')) as DownloadRecord[];
+      for (const it of arr) this.items.set(it.id, it);
+    } catch {}
+  }
+
+  retry(id: string): DownloadRecord | undefined {
+    const rec = this.items.get(id);
+    if (!rec) return undefined;
+    return this.enqueue({ url: rec.url, format: rec.format, quality: rec.quality });
   }
 
   pause(id: string) {

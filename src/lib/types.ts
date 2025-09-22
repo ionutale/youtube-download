@@ -18,9 +18,10 @@ export type DownloadItem = {
 	id: string;
 	title?: string;
 	progress?: number;
-	status: 'queued' | 'downloading' | 'completed' | 'failed' | 'canceled';
+	status: 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
 	speedBps?: number;
 	etaSeconds?: number;
+	createdAt?: number;
 };
 
 export type HistoryEntry = {
