@@ -22,6 +22,7 @@
 
 	let { data }: PageProps = $props();
 	let quality = $state('highest');
+	let format: 'mp3' | 'mp4' = $state('mp4');
 
 	type SearchVideoData = typeof data | undefined;
 
@@ -63,19 +64,28 @@
 		path: string;
 	} | null = null;
 	let progress = 0;
-	let downloads = $state([]);
+	import type { DownloadItem } from '$lib/types';
+	let downloads = $state<DownloadItem[]>([]);
 
 	onMount(() => {
-		const ws = new WebSocket('ws://localhost:3000');
-
-		ws.onmessage = (event) => {
-			const data = JSON.parse(event.data);
-			if (data.type === 'progress') {
-				progress = data.progress;
+		const es = new EventSource('/api/events');
+		es.onmessage = (event) => {
+			try {
+				const data = JSON.parse(event.data);
+				if (data.type === 'snapshot') {
+					downloads = data.downloads;
+				} else if (data.type === 'update') {
+					const d = data.download;
+					const idx = downloads.findIndex((x) => x.id === d.id);
+					if (idx >= 0) downloads[idx] = d; else downloads = [d, ...downloads];
+					progress = d.progress ?? progress;
+				}
+			} catch (e) {
+				console.error('SSE parse error', e);
 			}
-			if (data.type === 'downloads') {
-				downloads = data.downloads;
-			}
+		};
+		es.onerror = () => {
+			console.error('SSE disconnected');
 		};
 	});
 
@@ -85,13 +95,19 @@
 		progress = 0;
 		video = null;
 		try {
-			const response = await fetch(`/api/download?url=${url}`, {
+			const response = await fetch(`/api/download?url=${encodeURIComponent(url)}&format=${format}&quality=${quality}` , {
 				method: 'POST'
 			});
 			const data = await response.json();
-			video = data;
+			if (response.ok) {
+				video = data;
+				toast.success('Download started');
+			} else {
+				toast.error(data?.error || 'Failed to start download');
+			}
 		} catch (error) {
 			console.error(error);
+			toast.error('Unexpected error');
 		} finally {
 			loading = false;
 		}
@@ -101,6 +117,18 @@
 <div class="form-control">
 	<div class="input-group">
 		<input type="text" placeholder="Search…" class="input input-bordered w-full" bind:value={url} />
+		<select class="select select-bordered" bind:value={format}>
+			<option value="mp4">MP4</option>
+			<option value="mp3">MP3</option>
+		</select>
+		<select class="select select-bordered" bind:value={quality}>
+			<option value="highest">Highest</option>
+			<option value="lowest">Lowest</option>
+			<option value="highestaudio">Highest audio</option>
+			<option value="lowestaudio">Lowest audio</option>
+			<option value="highestvideo">Highest video</option>
+			<option value="lowestvideo">Lowest video</option>
+		</select>
 		<button class="btn btn-square" on:click={search} disabled={loading}>
 			<svg
 				xmlns="http://www.w3.org/2000/svg"

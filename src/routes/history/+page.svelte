@@ -1,15 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	let history = $state([]);
+	import type { HistoryEntry } from '$lib/types';
+	let history = $state<HistoryEntry[]>([]);
 
 	onMount(async () => {
 		const response = await fetch('/api/history');
 		history = await response.json();
 	});
 
-	async function remove(path) {
-		await fetch(`/api/history?path=${path}`, {
+	async function remove(path: string) {
+		// path is like /files/<rel>
+		const rel = decodeURIComponent(path.replace(/^\/files\//, ''));
+		await fetch(`/api/history?rel=${encodeURIComponent(rel)}`, {
 			method: 'DELETE'
 		});
 		history = history.filter((video) => video.path !== path);
