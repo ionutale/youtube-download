@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR, MAX_CONCURRENCY } from './config';
+import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload } from './db';
 import ffmpegPath from 'ffmpeg-static';
 import { spawn } from 'child_process';
 import ytdl from './ytdl';
@@ -47,15 +48,15 @@ class DownloadsManager extends EventEmitter {
   private ctrls: Map<string, Controller> = new Map();
   private queue: string[] = [];
   private running = 0;
-  private dbPath = path.join(DOWNLOAD_DIR, 'downloads.json');
   private saveTimer?: NodeJS.Timeout;
 
   constructor() {
     super();
-    if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+  if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
     const th = path.join(DOWNLOAD_DIR, 'thumbnails');
     if (!fs.existsSync(th)) fs.mkdirSync(th, { recursive: true });
-    this.loadState();
+  try { dbMigrateFromLegacy(); } catch {}
+  this.loadState();
     // requeue items that were in progress
     for (const rec of this.items.values()) {
       if (rec.status === 'queued' || rec.status === 'downloading' || rec.status === 'paused') {
@@ -239,14 +240,13 @@ class DownloadsManager extends EventEmitter {
   private saveState() {
     try {
       const data = Array.from(this.items.values());
-      fs.writeFileSync(this.dbPath, JSON.stringify(data));
+      for (const rec of data) dbUpsertDownload(rec);
     } catch {}
   }
 
   private loadState() {
     try {
-      if (!fs.existsSync(this.dbPath)) return;
-      const arr = JSON.parse(fs.readFileSync(this.dbPath, 'utf-8')) as DownloadRecord[];
+      const arr = dbLoadDownloads();
       for (const it of arr) this.items.set(it.id, it);
     } catch {}
   }

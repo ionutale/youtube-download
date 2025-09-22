@@ -56,15 +56,15 @@
 		}
 	}
 
-	let url = '';
-	let loading = false;
+	let url = $state('');
+	let loading = $state(false);
 	let video: {
 		id?: string;
 		title?: string;
 		thumbnail?: string;
 		path?: string;
-	} | null = null;
-	let progress = 0;
+	} | null = $state(null);
+	let progress = $state(0);
 	import type { DownloadItem } from '$lib/types';
 	let downloads = $state<DownloadItem[]>([]);
 	let sortBy: 'createdAt' | 'progress' = $state('createdAt');
@@ -147,7 +147,7 @@
 			<option value="highestvideo">Highest video</option>
 			<option value="lowestvideo">Lowest video</option>
 		</select>
-		<button class="btn btn-square" onclick={search} disabled={loading}>
+	<button class="btn btn-square" aria-label="Search" onclick={search} disabled={loading}>
 			<svg
 				xmlns="http://www.w3.org/2000/svg"
 				class="h-6 w-6"
@@ -166,15 +166,15 @@
 </div>
 
 <div class="mt-4 flex items-center gap-2">
-	<label>Filter</label>
-	<select class="select select-bordered select-xs" bind:value={filterBy}>
+	<label for="filterBy">Filter</label>
+	<select id="filterBy" class="select select-bordered select-xs" bind:value={filterBy}>
 		<option value="all">All</option>
 		<option value="active">Active</option>
 		<option value="completed">Completed</option>
 		<option value="failed">Failed</option>
 	</select>
-	<label>Sort</label>
-	<select class="select select-bordered select-xs" bind:value={sortBy}>
+	<label for="sortBy">Sort</label>
+	<select id="sortBy" class="select select-bordered select-xs" bind:value={sortBy}>
 		<option value="createdAt">Created</option>
 		<option value="progress">Progress</option>
 	</select>
@@ -240,31 +240,4 @@
 </div>
 
 <style>
-	section#search {
-		display: flex;
-		flex-direction: row;
-		justify-content: center;
-	}
-
-	section#search input {
-		font-size: x-large;
-		width: 50rem;
-		height: 2rem;
-	}
-
-	section#search-result {
-		margin-top: 2rem;
-
-		display: flex;
-		flex-direction: row;
-		justify-content: center;
-	}
-
-	section#search-result article {
-		display: flex;
-		flex-direction: row;
-		justify-content: center;
-		max-width: 780px;
-		gap: 1rem;
-	}
 </style>
