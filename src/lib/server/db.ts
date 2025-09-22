@@ -1,16 +1,29 @@
-import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { DOWNLOAD_DIR } from './config';
 import type { DownloadRecord } from './downloads';
 
-const DB_PATH = path.join(DOWNLOAD_DIR, 'ytdl.db');
-if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+let sqliteOk = false;
+let sqliteApi: {
+  upsert: (rec: DownloadRecord) => void;
+  load: () => DownloadRecord[];
+  completed: () => Array<{ title: string; path: string; thumbnail: string }>;
+  deleteByRel: (rel: string) => void;
+  migrate: () => void;
+};
 
-db.exec(`
+const JSON_STATE = path.join(DOWNLOAD_DIR, 'downloads.json');
+if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+
+try {
+  // Native path
+  const { default: Database } = await import('better-sqlite3');
+  const DB_PATH = path.join(DOWNLOAD_DIR, 'ytdl.db');
+  const db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+
+  db.exec(`
 CREATE TABLE IF NOT EXISTS downloads (
   id TEXT PRIMARY KEY,
   url TEXT NOT NULL,
@@ -36,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status);
 CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
 `);
 
-const upsertStmt = db.prepare(`INSERT INTO downloads (
+  const upsertStmt = db.prepare(`INSERT INTO downloads (
   id,url,title,filename,filePath,relPath,thumbnail,format,quality,progress,status,createdAt,updatedAt,size,downloaded,speedBps,etaSeconds,durationSeconds,error
 ) VALUES (
   @id,@url,@title,@filename,@filePath,@relPath,@thumbnail,@format,@quality,@progress,@status,@createdAt,@updatedAt,@size,@downloaded,@speedBps,@etaSeconds,@durationSeconds,@error
@@ -61,61 +74,99 @@ const upsertStmt = db.prepare(`INSERT INTO downloads (
   error=excluded.error
 `);
 
-export function dbUpsertDownload(rec: DownloadRecord) {
-  upsertStmt.run(rec as any);
-}
-
-export function dbLoadDownloads(): DownloadRecord[] {
-  const rows = db.prepare('SELECT * FROM downloads').all();
-  return rows as DownloadRecord[];
-}
-
-export function dbCompletedHistory(): Array<{ title: string; path: string; thumbnail: string }> {
-  const rows = db.prepare('SELECT title, relPath, thumbnail FROM downloads WHERE status = "completed" ORDER BY createdAt DESC').all() as Array<{ title: string; relPath: string; thumbnail?: string }>;
-  return rows.map((r) => ({ title: r.title, path: `/${path.join('files', r.relPath)}`, thumbnail: r.thumbnail || '/favicon.png' }));
-}
-
-export function dbDeleteByRel(relPath: string) {
-  db.prepare('DELETE FROM downloads WHERE relPath = ?').run(relPath);
-}
-
-// One-time migration from legacy JSON files
-export function dbMigrateFromLegacy() {
-  const legacyState = path.join(DOWNLOAD_DIR, 'downloads.json');
-  try {
-    if (fs.existsSync(legacyState)) {
-      const arr = JSON.parse(fs.readFileSync(legacyState, 'utf-8')) as DownloadRecord[];
-      const tx = db.transaction((items: DownloadRecord[]) => items.forEach((i) => upsertStmt.run(i as any)));
-      tx(arr);
+  sqliteApi = {
+    upsert: (rec) => upsertStmt.run(rec as any),
+    load: () => db.prepare('SELECT * FROM downloads').all() as DownloadRecord[],
+    completed: () => {
+      const rows = db
+        .prepare('SELECT title, relPath, thumbnail FROM downloads WHERE status = "completed" ORDER BY createdAt DESC')
+        .all() as Array<{ title: string; relPath: string; thumbnail?: string }>;
+      return rows.map((r) => ({ title: r.title, path: `/${path.join('files', r.relPath)}`, thumbnail: r.thumbnail || '/favicon.png' }));
+    },
+    deleteByRel: (rel) => { db.prepare('DELETE FROM downloads WHERE relPath = ?').run(rel); },
+    migrate: () => {
+      const legacyState = JSON_STATE;
+      try {
+        if (fs.existsSync(legacyState)) {
+          const arr = JSON.parse(fs.readFileSync(legacyState, 'utf-8')) as DownloadRecord[];
+          const tx = db.transaction((items: DownloadRecord[]) => items.forEach((i) => upsertStmt.run(i as any)));
+          tx(arr);
+        }
+      } catch {}
+      try {
+        const files = fs.readdirSync(DOWNLOAD_DIR).filter((f) => f.endsWith('.json') && f !== 'downloads.json');
+        for (const meta of files) {
+          const m = JSON.parse(fs.readFileSync(path.join(DOWNLOAD_DIR, meta), 'utf-8')) as { title: string; thumbnail?: string; path: string };
+          const relPath = decodeURIComponent(m.path.replace(/^\/files\//, ''));
+          const id = `legacy-${meta.replace(/\.json$/, '')}`;
+          upsertStmt.run({
+            id,
+            url: '',
+            title: m.title,
+            filename: path.basename(relPath),
+            filePath: path.join(DOWNLOAD_DIR, relPath),
+            relPath,
+            thumbnail: m.thumbnail,
+            format: path.extname(relPath).toLowerCase() === '.mp3' ? 'mp3' : 'mp4',
+            quality: null,
+            progress: 100,
+            status: 'completed',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            size: null,
+            downloaded: null,
+            speedBps: null,
+            etaSeconds: null,
+            durationSeconds: null,
+            error: null
+          } as any);
+        }
+      } catch {}
     }
-  } catch {}
-  try {
-    const files = fs.readdirSync(DOWNLOAD_DIR).filter((f) => f.endsWith('.json') && f !== 'downloads.json');
-    for (const meta of files) {
-      const m = JSON.parse(fs.readFileSync(path.join(DOWNLOAD_DIR, meta), 'utf-8')) as { title: string; thumbnail?: string; path: string };
-      const relPath = decodeURIComponent(m.path.replace(/^\/files\//, ''));
-      const id = `legacy-${meta.replace(/\.json$/, '')}`;
-      upsertStmt.run({
-        id,
-        url: '',
-        title: m.title,
-        filename: path.basename(relPath),
-        filePath: path.join(DOWNLOAD_DIR, relPath),
-        relPath,
-        thumbnail: m.thumbnail,
-        format: path.extname(relPath).toLowerCase() === '.mp3' ? 'mp3' : 'mp4',
-        quality: null,
-        progress: 100,
-        status: 'completed',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        size: null,
-        downloaded: null,
-        speedBps: null,
-        etaSeconds: null,
-        durationSeconds: null,
-        error: null
-      } as any);
-    }
-  } catch {}
+  };
+  sqliteOk = true;
+} catch (e) {
+  console.warn('[db] SQLite unavailable, using JSON fallback:', (e as any)?.message || e);
 }
+
+// Fallback JSON implementations
+if (!sqliteOk) {
+  sqliteApi = {
+    upsert: (rec) => {
+      const arr = fs.existsSync(JSON_STATE) ? (JSON.parse(fs.readFileSync(JSON_STATE, 'utf-8')) as DownloadRecord[]) : [];
+      const idx = arr.findIndex((x) => x.id === rec.id);
+      if (idx >= 0) arr[idx] = rec; else arr.push(rec);
+      fs.writeFileSync(JSON_STATE, JSON.stringify(arr));
+    },
+    load: () => {
+      if (!fs.existsSync(JSON_STATE)) return [];
+      try { return JSON.parse(fs.readFileSync(JSON_STATE, 'utf-8')) as DownloadRecord[]; } catch { return []; }
+    },
+    completed: () => {
+      const files = fs.readdirSync(DOWNLOAD_DIR).filter((f) => f.endsWith('.json') && f !== 'downloads.json');
+      const out: Array<{ title: string; path: string; thumbnail: string }> = [];
+      for (const meta of files) {
+        try {
+          const m = JSON.parse(fs.readFileSync(path.join(DOWNLOAD_DIR, meta), 'utf-8')) as { title: string; thumbnail?: string; path: string };
+          out.push({ title: m.title, path: m.path, thumbnail: m.thumbnail || '/favicon.png' });
+        } catch {}
+      }
+      return out;
+    },
+    deleteByRel: (rel) => {
+      if (!fs.existsSync(JSON_STATE)) return;
+      try {
+        const arr = JSON.parse(fs.readFileSync(JSON_STATE, 'utf-8')) as DownloadRecord[];
+        const filtered = arr.filter((x) => x.relPath !== rel);
+        fs.writeFileSync(JSON_STATE, JSON.stringify(filtered));
+      } catch {}
+    },
+    migrate: () => {}
+  };
+}
+
+export function dbUpsertDownload(rec: DownloadRecord) { sqliteApi.upsert(rec); }
+export function dbLoadDownloads(): DownloadRecord[] { return sqliteApi.load(); }
+export function dbCompletedHistory(): Array<{ title: string; path: string; thumbnail: string }> { return sqliteApi.completed(); }
+export function dbDeleteByRel(relPath: string) { sqliteApi.deleteByRel(relPath); }
+export function dbMigrateFromLegacy() { sqliteApi.migrate(); }

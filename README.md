@@ -23,6 +23,32 @@ pnpm install
 pnpm run dev
 ```
 
+### Persistence (SQLite + Fallback)
+
+- This app persists downloads to SQLite at `download/ytdl.db` via `better-sqlite3`.
+- If native bindings are unavailable at runtime (common on fresh Node upgrades), the app logs a warning and falls back to JSON files in `download/` so development remains unblocked.
+
+Fix native bindings on macOS/Node 24 (darwin/arm64):
+
+```bash
+# Ensure Xcode Command Line Tools are installed
+xcode-select --install || true
+
+# Rebuild native bindings for the current Node version
+pnpm rebuild better-sqlite3
+
+# Verify it loads
+node -e "require('better-sqlite3'); console.log('better-sqlite3 loaded')"
+```
+
+Tip: If you switched Node versions (e.g., via `nvm`), reinstall deps:
+
+```bash
+rm -rf node_modules pnpm-lock.yaml
+pnpm install
+pnpm rebuild better-sqlite3
+```
+
 ## Environment
 
 Copy `.env.example` to `.env` and adjust as needed:
