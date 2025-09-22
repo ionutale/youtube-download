@@ -1,9 +1,5 @@
 <script lang="ts">
 	import "../app.css";
-	import { Progress } from '$lib/components/ui/progress';
-	import { Separator } from '$lib/components/ui/separator';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	
