@@ -10,6 +10,7 @@ import ytdl from './ytdl';
 
 // Resolve ffmpeg path: prefer ffmpeg-static, else system ffmpeg from PATH
 let RESOLVED_FFMPEG: string | null = null;
+let HAS_YTDLP = false;
 try {
   const staticPath = (ffmpegPath || null) as string | null;
   if (staticPath && fs.existsSync(staticPath)) {
@@ -18,7 +19,18 @@ try {
     const res = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
     if (res.status === 0) RESOLVED_FFMPEG = 'ffmpeg';
   }
+  const ytdlp = spawnSync('yt-dlp', ['--version'], { stdio: 'ignore' });
+  HAS_YTDLP = ytdlp.status === 0;
 } catch {}
+
+async function downloadWithYtDlp(url: string, outPath: string) {
+  return await new Promise<void>((resolve, reject) => {
+    console.warn('[downloads] falling back to yt-dlp for url=%s', url);
+    const proc = spawn('yt-dlp', ['-f', 'bv*+ba/b', '--merge-output-format', 'mp4', '-o', outPath, url], { stdio: 'inherit' });
+    proc.on('error', reject);
+    proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('yt-dlp exit ' + code))));
+  });
+}
 
 export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
 
@@ -184,29 +196,37 @@ class DownloadsManager extends EventEmitter {
   let writeFile: fs.WriteStream | undefined;
       if (rec.format === 'mp4' && !progressive && ffmpegExists) {
         console.log('[downloads] muxing via ffmpeg at %s', ff);
-        // Mux separate streams using ffmpeg
-        const video = ytdl(rec.url, { quality: 'highestvideo' });
-        const audio = ytdl(rec.url, { quality: 'highestaudio' });
-        const proc: any = spawn(ff, [
-          '-y',
-          '-i', 'pipe:3',
-          '-i', 'pipe:4',
-          '-c:v', 'copy',
-          '-c:a', 'aac',
-          '-movflags', '+faststart',
-          tempPath
-        ], { stdio: ['ignore', 'inherit', 'inherit', 'pipe', 'pipe'] });
-        // Pipe the two streams to ffmpeg
-        (video as any).pipe(proc.stdio[3]);
-        (audio as any).pipe(proc.stdio[4]);
-        stream = proc;
-        await new Promise<void>((resolve, reject) => {
-          proc.on('error', (err: any) => {
-            console.error('[downloads] ffmpeg mux error id=%s:', id, err);
-            reject(err);
+        try {
+          // Mux separate streams using ffmpeg
+          const video = ytdl(rec.url, { quality: 'highestvideo' });
+          const audio = ytdl(rec.url, { quality: 'highestaudio' });
+          const proc: any = spawn(ff, [
+            '-y',
+            '-i', 'pipe:3',
+            '-i', 'pipe:4',
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-movflags', '+faststart',
+            tempPath
+          ], { stdio: ['ignore', 'inherit', 'inherit', 'pipe', 'pipe'] });
+          // Pipe the two streams to ffmpeg
+          (video as any).pipe(proc.stdio[3]);
+          (audio as any).pipe(proc.stdio[4]);
+          stream = proc;
+          await new Promise<void>((resolve, reject) => {
+            proc.on('error', (err: any) => {
+              console.error('[downloads] ffmpeg mux error id=%s:', id, err);
+              reject(err);
+            });
+            proc.on('close', (code: number) => (code === 0 ? resolve() : reject(new Error('ffmpeg mux exit ' + code))));
           });
-          proc.on('close', (code: number) => (code === 0 ? resolve() : reject(new Error('ffmpeg mux exit ' + code))));
-        });
+        } catch (e) {
+          if (HAS_YTDLP) {
+            await downloadWithYtDlp(rec.url, tempPath);
+          } else {
+            throw e;
+          }
+        }
       } else {
         if (rec.format === 'mp4' && !progressive && !ffmpegExists) {
           console.warn('[downloads] ffmpeg not found; falling back to progressive stream attempt');
@@ -233,6 +253,8 @@ class DownloadsManager extends EventEmitter {
           if ((err?.code === 'ECONNRESET' || /aborted/i.test(String(err?.message || ''))) ) {
             console.warn('[downloads] retry after transient error id=%s', id);
             await tryOnce();
+          } else if (rec.format === 'mp4' && HAS_YTDLP) {
+            await downloadWithYtDlp(rec.url, tempPath);
           } else {
             throw err;
           }
