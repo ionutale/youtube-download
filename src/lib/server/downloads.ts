@@ -11,6 +11,8 @@ import ytdl from './ytdl';
 // Resolve ffmpeg path: prefer ffmpeg-static, else system ffmpeg from PATH
 let RESOLVED_FFMPEG: string | null = null;
 let HAS_YTDLP = false;
+const RESOLVED_UA = process.env.YT_UA || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+const RESOLVED_COOKIE = process.env.YT_COOKIE || '';
 try {
   const staticPath = (ffmpegPath || null) as string | null;
   if (staticPath && fs.existsSync(staticPath)) {
@@ -23,10 +25,28 @@ try {
   HAS_YTDLP = ytdlp.status === 0;
 } catch {}
 
+function buildHeaders() {
+  const h: Record<string, string> = {
+    'user-agent': RESOLVED_UA,
+    'accept-language': 'en-US,en;q=0.9'
+  };
+  if (RESOLVED_COOKIE) h['cookie'] = RESOLVED_COOKIE;
+  return h;
+}
+
 async function downloadWithYtDlp(url: string, outPath: string) {
   return await new Promise<void>((resolve, reject) => {
     console.warn('[downloads] falling back to yt-dlp for url=%s', url);
     const proc = spawn('yt-dlp', ['-f', 'bv*+ba/b', '--merge-output-format', 'mp4', '-o', outPath, url], { stdio: 'inherit' });
+    proc.on('error', reject);
+    proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('yt-dlp exit ' + code))));
+  });
+}
+
+async function downloadWithYtDlpAudioMp3(url: string, outPathMp3: string) {
+  return await new Promise<void>((resolve, reject) => {
+    console.warn('[downloads] yt-dlp audio extract to mp3 for url=%s', url);
+    const proc = spawn('yt-dlp', ['-x', '--audio-format', 'mp3', '-o', outPathMp3, url], { stdio: 'inherit' });
     proc.on('error', reject);
     proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('yt-dlp exit ' + code))));
   });
@@ -157,9 +177,36 @@ class DownloadsManager extends EventEmitter {
     try {
       console.log('[downloads] run start id=%s', id);
       this.update(id, { status: 'downloading' });
-      const info = await (ytdl.getInfo ? ytdl.getInfo(rec.url) : (ytdl as any).getInfo(rec.url));
-      const title = info.videoDetails.title as string;
-      const thumbnails = info.videoDetails.thumbnails as Array<{ url: string }>;
+        const headers = buildHeaders();
+        let info: any;
+        try {
+          info = await (ytdl.getInfo ? ytdl.getInfo(rec.url, { requestOptions: { headers } }) : (ytdl as any).getInfo(rec.url, { requestOptions: { headers } }));
+        } catch (e) {
+          console.warn('[downloads] getInfo failed; considering yt-dlp fallback id=%s', id);
+          const titleSafe = 'download';
+          const ext = rec.format === 'mp3' ? 'mp3' : 'mp4';
+          const relPath = titleSafe + `.${ext}`;
+          const absPath = path.join(DOWNLOAD_DIR, relPath);
+          const tempPath = absPath + '.part';
+          if (rec.format === 'mp3' && HAS_YTDLP) {
+            await downloadWithYtDlpAudioMp3(rec.url, absPath);
+            const meta = { title: titleSafe, thumbnail: undefined, path: `/${path.join('files', relPath)}` };
+            fs.writeFileSync(path.join(DOWNLOAD_DIR, titleSafe + '.json'), JSON.stringify(meta));
+            this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
+            return;
+          }
+          if (rec.format === 'mp4' && HAS_YTDLP) {
+            await downloadWithYtDlp(rec.url, tempPath);
+            fs.renameSync(tempPath, absPath);
+            const meta = { title: titleSafe, thumbnail: undefined, path: `/${path.join('files', relPath)}` };
+            fs.writeFileSync(path.join(DOWNLOAD_DIR, titleSafe + '.json'), JSON.stringify(meta));
+            this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
+            return;
+          }
+          throw e;
+        }
+  const title = info.videoDetails?.title as string || 'download';
+  const thumbnails = (info.videoDetails?.thumbnails as Array<{ url: string }>) || [];
       const safe = title.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 120);
   const ext = rec.format === 'mp3' ? 'mp3' : 'mp4';
       const relPath = safe + `.${ext}`;
@@ -168,6 +215,28 @@ class DownloadsManager extends EventEmitter {
       const thumbLocal = await this.cacheThumbnail(title, thumbnails?.[0]?.url);
       this.update(id, { title, filename: path.basename(absPath), filePath: absPath, relPath, thumbnail: thumbLocal || thumbnails?.[0]?.url });
 
+      if (!info.formats || info.formats.length === 0) {
+        console.warn('[downloads] no formats in info; considering yt-dlp fallback id=%s', id);
+        const ext = rec.format === 'mp3' ? 'mp3' : 'mp4';
+        const relPath = safe + `.${ext}`;
+        const absPath = path.join(DOWNLOAD_DIR, relPath);
+        const tempPath = absPath + '.part';
+        if (rec.format === 'mp3' && HAS_YTDLP) {
+          await downloadWithYtDlpAudioMp3(rec.url, absPath);
+          const metadata = { title: safe, thumbnail: thumbnails?.[0]?.url, path: `/${path.join('files', relPath)}` };
+          fs.writeFileSync(path.join(DOWNLOAD_DIR, safe + '.json'), JSON.stringify(metadata));
+          this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
+          return;
+        }
+        if (rec.format === 'mp4' && HAS_YTDLP) {
+          await downloadWithYtDlp(rec.url, tempPath);
+          fs.renameSync(tempPath, absPath);
+          const metadata = { title: safe, thumbnail: thumbnails?.[0]?.url, path: `/${path.join('files', relPath)}` };
+          fs.writeFileSync(path.join(DOWNLOAD_DIR, safe + '.json'), JSON.stringify(metadata));
+          this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
+          return;
+        }
+      }
       const chosen = (ytdl.chooseFormat ? ytdl.chooseFormat(info.formats, { quality: rec.quality }) : (ytdl as any).chooseFormat(info.formats, { quality: rec.quality }));
   console.log('[downloads] chosen format id=%s itag=%s hasVideo=%s hasAudio=%s isHLS=%s isDash=%s', id, (chosen as any)?.itag, (chosen as any)?.hasVideo, (chosen as any)?.hasAudio, (chosen as any)?.isHLS, (chosen as any)?.isDashMPD);
       const hasVideo = !!chosen.hasVideo;
@@ -194,12 +263,13 @@ class DownloadsManager extends EventEmitter {
   console.log('[downloads] paths id=%s abs=%s tmp=%s', id, absPath, tempPath);
   let stream: any;
   let writeFile: fs.WriteStream | undefined;
+  let producedFinal = false;
       if (rec.format === 'mp4' && !progressive && ffmpegExists) {
         console.log('[downloads] muxing via ffmpeg at %s', ff);
         try {
           // Mux separate streams using ffmpeg
-          const video = ytdl(rec.url, { quality: 'highestvideo' });
-          const audio = ytdl(rec.url, { quality: 'highestaudio' });
+          const video = ytdl(rec.url, { quality: 'highestvideo', requestOptions: { headers } });
+          const audio = ytdl(rec.url, { quality: 'highestaudio', requestOptions: { headers } });
           const proc: any = spawn(ff, [
             '-y',
             '-i', 'pipe:3',
@@ -238,7 +308,9 @@ class DownloadsManager extends EventEmitter {
           const file = fs.createWriteStream(tempPath);
           writeFile = file;
           // Progressive or mp3 flow (mp3 handled later)
-          stream = ytdl(rec.url, { format: effective });
+          const ytdlOpts: any = rec.format === 'mp3' ? { quality: 'highestaudio' } : { format: effective };
+          ytdlOpts.requestOptions = { ...(ytdlOpts.requestOptions || {}), headers };
+          stream = ytdl(rec.url, ytdlOpts);
           stream.on?.('error', (err: any) => console.error('[downloads] ytdl stream error id=%s:', id, err));
           await new Promise<void>((resolve, reject) => {
             stream.on('error', reject);
@@ -255,42 +327,62 @@ class DownloadsManager extends EventEmitter {
             await tryOnce();
           } else if (rec.format === 'mp4' && HAS_YTDLP) {
             await downloadWithYtDlp(rec.url, tempPath);
+          } else if (rec.format === 'mp3' && HAS_YTDLP) {
+            // Produce final mp3 directly to absPath
+            await downloadWithYtDlpAudioMp3(rec.url, absPath);
+            producedFinal = true;
           } else {
+            if ((err && (err.statusCode === 403 || /403/.test(String(err))))) {
+              console.warn('[downloads] 403 without yt-dlp; consider installing yt-dlp (brew install yt-dlp) or adding YT_COOKIE to .env');
+              if (RESOLVED_COOKIE) console.warn('[downloads] cookie present, still 403 — may be region/age restricted');
+            }
             throw err;
           }
         }
       }
   this.ctrls.set(id, { stream, file: writeFile, tempPath });
 
-      let lastTime = Date.now();
-      let lastBytes = 0;
-      let total = Number(chosen.contentLength || 0);
-      stream.on('progress', (_chunkLength: number, downloaded: number, tot: number) => {
-        if (tot) total = tot;
-        const now = Date.now();
-        const dt = (now - lastTime) / 1000;
-        const db = downloaded - lastBytes;
-        const speed = dt > 0 ? db / dt : 0;
-        const eta = speed > 0 && total ? Math.max(0, Math.round((total - downloaded) / speed)) : undefined;
-        lastTime = now;
-        lastBytes = downloaded;
-        const pct = total ? Math.round((downloaded / total) * 100) : 0;
-        this.update(id, { progress: pct, size: total, downloaded, speedBps: Math.round(speed), etaSeconds: eta });
-      });
-
-      if (rec.format === 'mp3' && ffmpegExists) {
-        console.log('[downloads] converting to mp3 via ffmpeg at %s', ff);
-        const mp3Path = absPath;
-        const proc: any = spawn(ff, ['-y', '-i', tempPath, '-vn', '-acodec', 'libmp3lame', mp3Path]);
-        await new Promise<void>((resolve, reject) => {
-          proc.on('error', (err: any) => {
-            console.error('[downloads] ffmpeg mp3 error id=%s:', id, err);
-            reject(err);
-          });
-          proc.on('close', (code: number) => (code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code))));
+      if (stream && (stream as any).on) {
+        let lastTime = Date.now();
+        let lastBytes = 0;
+        let total = Number(chosen.contentLength || 0);
+        stream.on('progress', (_chunkLength: number, downloaded: number, tot: number) => {
+          if (tot) total = tot;
+          const now = Date.now();
+          const dt = (now - lastTime) / 1000;
+          const db = downloaded - lastBytes;
+          const speed = dt > 0 ? db / dt : 0;
+          const eta = speed > 0 && total ? Math.max(0, Math.round((total - downloaded) / speed)) : undefined;
+          lastTime = now;
+          lastBytes = downloaded;
+          const pct = total ? Math.round((downloaded / total) * 100) : 0;
+          this.update(id, { progress: pct, size: total, downloaded, speedBps: Math.round(speed), etaSeconds: eta });
         });
-        fs.unlinkSync(tempPath);
+      }
+
+      if (rec.format === 'mp3') {
+        if (!producedFinal) {
+          if (ffmpegExists) {
+            console.log('[downloads] converting to mp3 via ffmpeg at %s', ff);
+            const mp3Path = absPath;
+            const proc: any = spawn(ff, ['-y', '-i', tempPath, '-vn', '-acodec', 'libmp3lame', mp3Path]);
+            await new Promise<void>((resolve, reject) => {
+              proc.on('error', (err: any) => {
+                console.error('[downloads] ffmpeg mp3 error id=%s:', id, err);
+                reject(err);
+              });
+              proc.on('close', (code: number) => (code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code))));
+            });
+            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+          } else if (HAS_YTDLP) {
+            await downloadWithYtDlpAudioMp3(rec.url, absPath);
+            if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
+          } else {
+            throw new Error('Cannot produce MP3: ffmpeg not found and yt-dlp unavailable');
+          }
+        }
       } else {
+        // mp4 path
         fs.renameSync(tempPath, absPath);
       }
       const metadata = { title, thumbnail: thumbLocal || thumbnails?.[0]?.url, path: `/${path.join('files', relPath)}` };
@@ -381,3 +473,6 @@ class DownloadsManager extends EventEmitter {
 }
 
 export const downloadsManager = new DownloadsManager();
+console.log('[downloads] ffmpeg:', RESOLVED_FFMPEG || 'not found');
+console.log('[downloads] yt-dlp available:', HAS_YTDLP);
+if (RESOLVED_COOKIE) console.log('[downloads] using YT_COOKIE from environment');
