@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - NODE_VERSION=22-alpine
+        - NODE_VERSION=22-bookworm-slim
     image: youtube-download:latest
     container_name: youtube-download
     environment:
