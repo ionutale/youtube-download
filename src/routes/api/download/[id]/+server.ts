@@ -14,12 +14,21 @@ export async function PATCH({ params, request }) {
   } else if (action === 'resume') {
     downloadsManager.resume(id);
     return json({ success: true });
+  } else if (action === 'cancel') {
+    downloadsManager.cancel(id);
+    return json({ success: true });
   } else if (action === 'retry') {
     const rec = await downloadsManager.retry(id);
     return json({ success: true, id: rec?.id });
   } else if (action === 'favorite') {
     downloadsManager.toggleFavorite(id);
     return json({ success: true });
+  } else if (action === 'setPriority') {
+    const priority = body.priority;
+    if (typeof priority === 'number') {
+      downloadsManager.setPriority(id, priority);
+      return json({ success: true });
+    }
   }
 
   return json({ error: 'Invalid action' }, { status: 400 });

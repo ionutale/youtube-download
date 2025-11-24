@@ -28,35 +28,21 @@ CREATE TABLE IF NOT EXISTS downloads (
   id TEXT PRIMARY KEY,
   url TEXT NOT NULL,
   title TEXT,
-  filename TEXT,
-  filePath TEXT,
-  relPath TEXT,
+  uploader TEXT,
+  duration INTEGER,
   thumbnail TEXT,
+  status TEXT DEFAULT 'queued',
+  progress INTEGER DEFAULT 0,
+  speed TEXT,
+  eta TEXT,
+  error TEXT,
   format TEXT,
   quality TEXT,
-  progress INTEGER,
-  status TEXT,
+  playlistId TEXT,
   createdAt INTEGER,
   updatedAt INTEGER,
-  size INTEGER,
-  downloaded INTEGER,
-  speedBps INTEGER,
-  etaSeconds INTEGER,
-  durationSeconds INTEGER,
-  error TEXT,
-  filenamePattern TEXT,
-  startTime TEXT,
-  endTime TEXT,
-  normalize INTEGER,
-  cookieContent TEXT,
-  proxyUrl TEXT,
-  useSponsorBlock INTEGER,
-  downloadSubtitles INTEGER,
-  rateLimit TEXT,
-  organizeByUploader INTEGER,
-  splitChapters INTEGER,
-  isFavorite INTEGER,
-  category TEXT
+  retryCount INTEGER DEFAULT 0,
+  priority INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status);
 CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
@@ -67,7 +53,7 @@ CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
     'filenamePattern TEXT', 'startTime TEXT', 'endTime TEXT', 'normalize INTEGER',
     'cookieContent TEXT', 'proxyUrl TEXT', 'useSponsorBlock INTEGER', 'downloadSubtitles INTEGER',
     'rateLimit TEXT', 'organizeByUploader INTEGER', 'splitChapters INTEGER', 'isFavorite INTEGER',
-    'category TEXT'
+    'category TEXT', 'retryCount INTEGER', 'priority INTEGER DEFAULT 0'
   ];
   for (const col of columns) {
     try { db.exec(`ALTER TABLE downloads ADD COLUMN ${col}`); } catch {}
@@ -75,10 +61,10 @@ CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
 
   const upsertStmt = db.prepare(`INSERT INTO downloads (
   id,url,title,filename,filePath,relPath,thumbnail,format,quality,progress,status,createdAt,updatedAt,size,downloaded,speedBps,etaSeconds,durationSeconds,error,
-  filenamePattern,startTime,endTime,normalize,cookieContent,proxyUrl,useSponsorBlock,downloadSubtitles,rateLimit,organizeByUploader,splitChapters,isFavorite,category
+  filenamePattern,startTime,endTime,normalize,cookieContent,proxyUrl,useSponsorBlock,downloadSubtitles,rateLimit,organizeByUploader,splitChapters,isFavorite,category,retryCount,priority
 ) VALUES (
   @id,@url,@title,@filename,@filePath,@relPath,@thumbnail,@format,@quality,@progress,@status,@createdAt,@updatedAt,@size,@downloaded,@speedBps,@etaSeconds,@durationSeconds,@error,
-  @filenamePattern,@startTime,@endTime,@normalize,@cookieContent,@proxyUrl,@useSponsorBlock,@downloadSubtitles,@rateLimit,@organizeByUploader,@splitChapters,@isFavorite,@category
+  @filenamePattern,@startTime,@endTime,@normalize,@cookieContent,@proxyUrl,@useSponsorBlock,@downloadSubtitles,@rateLimit,@organizeByUploader,@splitChapters,@isFavorite,@category,@retryCount,@priority
 ) ON CONFLICT(id) DO UPDATE SET
   url=excluded.url,
   title=excluded.title,
@@ -110,7 +96,9 @@ CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
   organizeByUploader=excluded.organizeByUploader,
   splitChapters=excluded.splitChapters,
   isFavorite=excluded.isFavorite,
-  category=excluded.category
+  category=excluded.category,
+  retryCount=excluded.retryCount,
+  priority=excluded.priority
 `);
 
   sqliteApi = {

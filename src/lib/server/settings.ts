@@ -10,6 +10,9 @@ export type ServerSettings = {
   scheduleEnabled?: boolean;
   scheduleStart?: string; // HH:mm
   scheduleEnd?: string; // HH:mm
+  maxConcurrency: number;
+  userAgent?: string;
+  maxRetries: number;
 };
 
 const defaults: ServerSettings = {
@@ -17,7 +20,10 @@ const defaults: ServerSettings = {
   webhookUrl: '',
   scheduleEnabled: false,
   scheduleStart: '00:00',
-  scheduleEnd: '06:00'
+  scheduleEnd: '06:00',
+  maxConcurrency: 2,
+  userAgent: '',
+  maxRetries: 0
 };
 
 let cached: ServerSettings | null = null;

@@ -24,6 +24,9 @@
   let scheduleEnabled = false;
   let scheduleStart = '00:00';
   let scheduleEnd = '06:00';
+  let maxConcurrency = 2;
+  let userAgent = '';
+  let maxRetries = 0;
 
   onMount(async () => {
     loadSystemStats();
@@ -39,6 +42,9 @@
       scheduleEnabled = data.settings.scheduleEnabled || false;
       scheduleStart = data.settings.scheduleStart || '00:00';
       scheduleEnd = data.settings.scheduleEnd || '06:00';
+      maxConcurrency = data.settings.maxConcurrency || 2;
+      userAgent = data.settings.userAgent || '';
+      maxRetries = data.settings.maxRetries || 0;
     } catch (e) {
       console.error('Failed to load system stats', e);
     }
@@ -48,7 +54,16 @@
     try {
       await fetch('/api/system', {
         method: 'POST',
-        body: JSON.stringify({ retentionDays, webhookUrl, scheduleEnabled, scheduleStart, scheduleEnd }),
+        body: JSON.stringify({ 
+          retentionDays, 
+          webhookUrl, 
+          scheduleEnabled, 
+          scheduleStart, 
+          scheduleEnd,
+          maxConcurrency,
+          userAgent,
+          maxRetries
+        }),
         headers: { 'Content-Type': 'application/json' }
       });
       toast.success('System settings saved');
@@ -192,7 +207,7 @@
               type="number" 
               bind:value={retentionDays} 
               min="0"
-              class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+              class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
             />
           </div>
           <label class="label">
@@ -210,7 +225,7 @@
               type="text" 
               bind:value={webhookUrl} 
               placeholder="https://discord.com/api/webhooks/..." 
-              class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+              class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
             />
           </div>
           <label class="label">
@@ -232,38 +247,58 @@
             <div class="flex gap-4 mt-2">
               <div class="form-control w-full">
                 <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Start Time</span></label>
-                <input type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+                <input type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
               </div>
               <div class="form-control w-full">
                 <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">End Time</span></label>
-                <input type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+                <input type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
               </div>
             </div>
           {/if}
         </div>
 
-        <!-- Scheduled Downloads (Feature 49) -->
-        <div class="form-control w-full max-w-md mt-4 border-t border-[var(--glass-border)] pt-4">
-          <label class="label cursor-pointer justify-start gap-4">
-            <input type="checkbox" class="toggle toggle-primary" bind:checked={scheduleEnabled} />
-            <div class="flex flex-col">
-              <span class="label-text text-[var(--text-color)] font-bold">Enable Schedule</span>
-              <span class="label-text-alt text-[var(--text-muted)]">Only download during specific hours</span>
-            </div>
+        <!-- Max Concurrency (Feature 30) -->
+        <div class="form-control w-full max-w-md mt-4">
+          <label class="label">
+            <span class="label-text text-[var(--text-muted)]">Max Concurrent Downloads</span>
           </label>
-          
-          {#if scheduleEnabled}
-            <div class="flex gap-4 mt-2">
-              <div class="form-control w-full">
-                <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Start Time</span></label>
-                <input type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
-              </div>
-              <div class="form-control w-full">
-                <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">End Time</span></label>
-                <input type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
-              </div>
-            </div>
-          {/if}
+          <input 
+            type="number" 
+            bind:value={maxConcurrency} 
+            min="1"
+            max="10"
+            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+          />
+        </div>
+
+        <!-- User Agent (Feature 10) -->
+        <div class="form-control w-full max-w-md mt-4">
+          <label class="label">
+            <span class="label-text text-[var(--text-muted)]">Custom User Agent</span>
+          </label>
+          <input 
+            type="text" 
+            bind:value={userAgent} 
+            placeholder="Mozilla/5.0..." 
+            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+          />
+        </div>
+
+        <!-- Max Retries (Feature 29) -->
+        <div class="form-control w-full max-w-md mt-4">
+          <label class="label">
+            <span class="label-text text-[var(--text-muted)]">Auto-Retry Attempts</span>
+          </label>
+          <input 
+            type="number" 
+            bind:value={maxRetries} 
+            min="0"
+            max="10"
+            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+          />
+          <label class="label">
+            <span class="label-text-alt text-[var(--text-muted)]">Number of times to retry failed downloads automatically.</span>
+          </label>
         </div>
 
         <div class="mt-4">
@@ -293,7 +328,7 @@
           type="text" 
           bind:value={pattern} 
           placeholder={'{title}'} 
-          class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+          class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
         />
         <label class="label">
           <span class="label-text-alt text-[var(--text-muted)]">
@@ -334,7 +369,7 @@
             type="text" 
             bind:value={proxyUrl} 
             placeholder="http://user:pass@host:port" 
-            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
         </div>
 
@@ -347,8 +382,52 @@
             type="text" 
             bind:value={rateLimit} 
             placeholder="e.g. 5M, 500K" 
-            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
+        </div>
+
+        <!-- Max Concurrency (Feature 30) -->
+        <div class="form-control w-full">
+          <label class="label">
+            <span class="label-text text-[var(--text-muted)]">Max Concurrent Downloads</span>
+          </label>
+          <input 
+            type="number" 
+            bind:value={maxConcurrency} 
+            min="1"
+            max="10"
+            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+          />
+        </div>
+
+        <!-- User Agent (Feature 10) -->
+        <div class="form-control w-full">
+          <label class="label">
+            <span class="label-text text-[var,--text-muted)]">Custom User Agent</span>
+          </label>
+          <input 
+            type="text" 
+            bind:value={userAgent} 
+            placeholder="Mozilla/5.0..." 
+            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+          />
+        </div>
+
+        <!-- Max Retries (Feature 29) -->
+        <div class="form-control w-full">
+          <label class="label">
+            <span class="label-text text-[var(--text-muted)]">Auto-Retry Attempts</span>
+          </label>
+          <input 
+            type="number" 
+            bind:value={maxRetries} 
+            min="0"
+            max="10"
+            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+          />
+          <label class="label">
+            <span class="label-text-alt text-[var(--text-muted)]">Number of times to retry failed downloads automatically.</span>
+          </label>
         </div>
       </div>
 
@@ -360,7 +439,7 @@
         <textarea 
           bind:value={cookieContent} 
           placeholder="# Netscape HTTP Cookie File..." 
-          class="textarea textarea-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue h-32 font-mono text-xs"
+          class="textarea textarea-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue h-32 font-mono text-xs"
         ></textarea>
         <label class="label">
           <span class="label-text-alt text-[var(--text-muted)]">Paste content of cookies.txt here to access age-restricted videos.</span>
@@ -464,7 +543,7 @@
           <label class="label cursor-pointer justify-start gap-4">
             <input type="checkbox" class="toggle toggle-primary" bind:checked={embedThumbnail} />
             <div class="flex flex-col">
-              <span class="label-text text-[var(--text-color)] font-bold">Embed Thumbnail</span>
+              <span class="label-text text-[var,--text-color)] font-bold">Embed Thumbnail</span>
               <span class="label-text-alt text-[var(--text-muted)]">Set video thumbnail as file icon/cover art</span>
             </div>
           </label>

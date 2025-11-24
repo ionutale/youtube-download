@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
-import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR, MAX_CONCURRENCY } from './config';
+import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR } from './config';
 import { getServerSettings } from './settings';
 import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload, dbDeleteByRel } from './db';
 import { spawn } from 'child_process';
@@ -50,6 +50,8 @@ export type DownloadRecord = {
   embedMetadata?: boolean;
   embedThumbnail?: boolean;
   category?: string;
+  retryCount?: number;
+  priority?: number;
 };
 
 export type DownloadEvent =
@@ -84,7 +86,7 @@ class DownloadsManager extends EventEmitter {
     for (const rec of this.items.values()) {
       if (rec.status === 'queued' || rec.status === 'downloading' || rec.status === 'paused') {
         rec.status = 'queued';
-        this.queue.push(rec.id);
+        if (!this.queue.includes(rec.id)) this.queue.push(rec.id);
       }
     }
     this.maybeRunNext();
@@ -326,6 +328,8 @@ class DownloadsManager extends EventEmitter {
       embedMetadata: input.embedMetadata,
       embedThumbnail: input.embedThumbnail,
       category: input.category,
+      retryCount: 0,
+      priority: 0,
       progress: 0,
       status: 'queued',
       createdAt: now,
@@ -347,6 +351,11 @@ class DownloadsManager extends EventEmitter {
     this.saveStateDebounced();
     return updated;
   }
+
+  setPriority(id: string, priority: number) {
+    this.update(id, { priority });
+  }
+
 
   public async getMetadata(url: string): Promise<{ title: string; thumbnail?: string; duration?: number; description?: string; uploader?: string; id?: string }> {
     return new Promise((resolve, reject) => {
@@ -534,6 +543,12 @@ class DownloadsManager extends EventEmitter {
           args.push('--proxy', rec.proxyUrl);
         }
 
+        // Feature 10: Custom User Agent
+        const ua = getServerSettings().userAgent;
+        if (ua) {
+          args.push('--user-agent', ua);
+        }
+
         // Feature 16: SponsorBlock
         if (rec.useSponsorBlock) {
           args.push('--sponsorblock-remove', 'all');
@@ -635,8 +650,21 @@ class DownloadsManager extends EventEmitter {
     } catch (e: any) {
       const msg = e?.message || String(e);
       console.error('[downloads] run error id=%s:', id, e);
-      this.update(id, { status: 'failed', error: msg });
-      this.sendWebhook(this.items.get(id)!);
+      
+      // Feature 29: Auto-Retry
+      const rec = this.items.get(id);
+      const maxRetries = getServerSettings().maxRetries || 0;
+      
+      if (rec && (rec.retryCount || 0) < maxRetries) {
+         const nextRetry = (rec.retryCount || 0) + 1;
+         console.log('[downloads] auto-retry id=%s attempt=%d/%d', id, nextRetry, maxRetries);
+         this.update(id, { status: 'queued', retryCount: nextRetry, error: `Retrying (${nextRetry}/${maxRetries})... ${msg}` });
+         this.queue.push(id);
+         // Don't send webhook yet
+      } else {
+         this.update(id, { status: 'failed', error: msg });
+         this.sendWebhook(this.items.get(id)!);
+      }
     } finally {
       this.ctrls.delete(id);
       if (cookiePath && fs.existsSync(cookiePath)) {
@@ -650,9 +678,29 @@ class DownloadsManager extends EventEmitter {
 
   private maybeRunNext() {
     if (!this.isScheduleAllowed()) return;
+    
+    const limit = getServerSettings().maxConcurrency || 2;
 
-    while (this.running < MAX_CONCURRENCY && this.queue.length) {
-      const next = this.queue.shift();
+    while (this.running < limit && this.queue.length) {
+      // Find highest priority item
+      let bestIdx = 0;
+      let bestPriority = -Infinity;
+      let bestCreatedAt = Infinity;
+
+      for (let i = 0; i < this.queue.length; i++) {
+        const id = this.queue[i];
+        const rec = this.items.get(id);
+        if (!rec) continue;
+        const p = rec.priority || 0;
+        // Higher priority first, then older createdAt
+        if (p > bestPriority || (p === bestPriority && rec.createdAt < bestCreatedAt)) {
+          bestPriority = p;
+          bestCreatedAt = rec.createdAt;
+          bestIdx = i;
+        }
+      }
+
+      const next = this.queue.splice(bestIdx, 1)[0];
       if (next) this.run(next);
     }
   }
