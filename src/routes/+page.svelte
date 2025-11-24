@@ -11,17 +11,15 @@
   let startTime = '';
   let endTime = '';
   let normalizeAudio = false;
-  let category = ''; // New category state
+  let category = '';
   let downloads: any[] = [];
   let stats: { totalBytes: number; freeBytes: number } | null = null;
   let eventSource: EventSource | null = null;
   let inputElement: HTMLInputElement | HTMLTextAreaElement;
   
-  // Feature 31: Search & Filter
   let searchTerm = '';
-  let filterCategory = ''; // New filter state
+  let filterCategory = '';
   
-  // Feature 26: Speed Graph
   let speedHistory: number[] = new Array(60).fill(0);
   let totalSpeed = 0;
 
@@ -31,7 +29,6 @@
       return `L ${i * (100/59)} ${24 - h}`;
     }).join(' ')} L 100 24 Z`;
 
-  // Get unique categories from downloads
   $: availableCategories = Array.from(new Set(downloads.map(d => d.category).filter(Boolean))).sort();
 
   $: filteredDownloads = downloads.filter(d => {
@@ -40,42 +37,27 @@
     return matchesSearch && matchesCategory;
   });
 
-  // Feature 36: File Preview
   let previewItem: any = null;
-  
-  // Feature 22: Real-time Terminal Output
   let logs: Record<string, string[]> = {};
   let activeLogId: string | null = null;
 
-  // Feature 35: Bulk Actions
   let selectedIds = new Set<string>();
   $: allSelected = filteredDownloads.length > 0 && selectedIds.size === filteredDownloads.length;
 
-  // Feature 1 & 2: Playlist Selection
   let playlistItems: any[] = [];
   let selectedPlaylistItems = new Set<string>();
   let playlistUrl = '';
   let isFetchingPlaylist = false;
 
-  // Feature 45: Shortcuts
   let showShortcuts = false;
 
-  // Feature 39: Redownload UI
   let redownloadItem: { url: string, id?: string } | null = null;
   let resolveRedownload: ((value: boolean) => void) | null = null;
 
   let isDragging = false;
 
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    isDragging = true;
-  }
-
-  function handleDragLeave(e: DragEvent) {
-    e.preventDefault();
-    isDragging = false;
-  }
-
+  function handleDragOver(e: DragEvent) { e.preventDefault(); isDragging = true; }
+  function handleDragLeave(e: DragEvent) { e.preventDefault(); isDragging = false; }
   function handleDrop(e: DragEvent) {
     e.preventDefault();
     isDragging = false;
@@ -86,14 +68,10 @@
     }
   }
 
-  function checkClipboard() {
-    // Optional: auto-paste if focused? Maybe annoying.
-  }
+  function checkClipboard() {}
 
   function handleGlobalKeydown(e: KeyboardEvent) {
-    if (e.ctrlKey && e.key === 'Enter') {
-      startDownload();
-    }
+    if (e.ctrlKey && e.key === 'Enter') startDownload();
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -115,7 +93,6 @@
 
   async function startDownload() {
     if (!url.trim()) return;
-    
     const urls = batchMode ? url.split('\n').filter(u => u.trim()) : [url.trim()];
     if (urls.length === 0) return;
 
@@ -199,26 +176,19 @@
   }
 
   function toggleSelection(id: string) {
-    if (selectedIds.has(id)) {
-      selectedIds.delete(id);
-    } else {
-      selectedIds.add(id);
-    }
-    selectedIds = new Set(selectedIds); // trigger reactivity
+    if (selectedIds.has(id)) selectedIds.delete(id);
+    else selectedIds.add(id);
+    selectedIds = new Set(selectedIds);
   }
 
   function toggleSelectAll() {
-    if (allSelected) {
-      selectedIds = new Set();
-    } else {
-      selectedIds = new Set(filteredDownloads.map(d => d.id));
-    }
+    if (allSelected) selectedIds = new Set();
+    else selectedIds = new Set(filteredDownloads.map(d => d.id));
   }
 
   async function deleteSelected() {
     if (selectedIds.size === 0) return;
     if (!confirm(`Delete ${selectedIds.size} items?`)) return;
-
     try {
       const ids = Array.from(selectedIds);
       const res = await fetch('/api/download', {
@@ -226,34 +196,30 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids })
       });
-      
       if (res.ok) {
         toast.success('Deleted selected items');
         selectedIds = new Set();
       } else {
         toast.error('Failed to delete items');
       }
-    } catch (e) {
+    } catch {
       toast.error('Error deleting items');
     }
   }
 
-  // Feature 40: Favorites
   async function toggleFavorite(id: string, currentStatus: boolean) {
     try {
-      // Optimistic update
       const idx = downloads.findIndex(d => d.id === id);
       if (idx >= 0) {
         downloads[idx].isFavorite = !currentStatus;
         downloads = [...downloads];
       }
-
       await fetch(`/api/download/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({ action: 'favorite' }),
         headers: { 'Content-Type': 'application/json' }
       });
-    } catch (e) {
+    } catch {
       toast.error('Failed to update favorite');
     }
   }
@@ -274,6 +240,66 @@
     previewItem = null;
   }
 
+  function handleRedownloadChoice(shouldDownload: boolean) {
+    if (resolveRedownload) resolveRedownload(shouldDownload);
+    redownloadItem = null;
+    resolveRedownload = null;
+    const modal = document.getElementById('redownload_modal') as HTMLDialogElement;
+    if (modal) modal.close();
+  }
+
+  function togglePlaylistSelection(url: string) {
+    if (selectedPlaylistItems.has(url)) selectedPlaylistItems.delete(url);
+    else selectedPlaylistItems.add(url);
+    selectedPlaylistItems = new Set(selectedPlaylistItems);
+  }
+
+  function togglePlaylistSelectAll() {
+    if (selectedPlaylistItems.size === playlistItems.length) selectedPlaylistItems = new Set();
+    else selectedPlaylistItems = new Set(playlistItems.map(i => i.url));
+  }
+
+  async function confirmPlaylistDownload() {
+    const modal = document.getElementById('playlist_modal') as HTMLDialogElement;
+    if (modal) modal.close();
+    const items = Array.from(selectedPlaylistItems);
+    if (items.length === 0) return;
+    toast.success(`Queuing ${items.length} videos...`);
+    let count = 0;
+    for (const itemUrl of items) {
+       try {
+         await fetch('/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: itemUrl,
+              format,
+              quality,
+              startTime,
+              endTime,
+              normalize: normalizeAudio,
+              category,
+              cookieContent: $settings.cookieContent,
+              proxyUrl: $settings.proxyUrl,
+              useSponsorBlock: $settings.useSponsorBlock,
+              downloadSubtitles: $settings.downloadSubtitles,
+              rateLimit: $settings.rateLimit,
+              organizeByUploader: $settings.organizeByUploader,
+              splitChapters: $settings.splitChapters,
+              downloadLyrics: $settings.downloadLyrics,
+              videoCodec: $settings.videoCodec,
+              embedMetadata: $settings.embedMetadata,
+              embedThumbnail: $settings.embedThumbnail
+            })
+         });
+         count++;
+       } catch {}
+    }
+    toast.success(`Started ${count} downloads`);
+    selectedPlaylistItems = new Set();
+    playlistItems = [];
+  }
+
   function connect() {
     if (eventSource) eventSource.close();
     eventSource = new EventSource('/api/events');
@@ -286,17 +312,13 @@
         } else if (data.type === 'update') {
           const idx = downloads.findIndex((d) => d.id === data.download.id);
           const prevStatus = idx >= 0 ? downloads[idx].status : null;
-          
           if (idx >= 0) downloads[idx] = data.download;
           else downloads = [data.download, ...downloads];
-
-          // Feature 24: Desktop Notifications
           if (prevStatus && prevStatus !== 'completed' && data.download.status === 'completed') {
             notify('Download Complete', `Finished: ${data.download.title || 'Video'}`);
           } else if (prevStatus && prevStatus !== 'failed' && data.download.status === 'failed') {
             notify('Download Failed', `Failed: ${data.download.title || 'Video'}`);
           }
-
         } else if (data.type === 'remove') {
           downloads = downloads.filter((d) => d.id !== data.id);
           delete logs[data.id];
@@ -305,21 +327,15 @@
           logs[data.id].push(data.message);
           if (logs[data.id].length > 200) logs[data.id].shift();
         }
-        
-        // Update speed stats
         totalSpeed = downloads.reduce((acc, d) => acc + (d.status === 'downloading' ? (d.speedBps || 0) : 0), 0);
-      } catch (e) {
-        console.error('Event parse error', e);
-      }
+      } catch (e) { console.error('Event parse error', e); }
     };
   }
 
-  // Update speed history every second
   onMount(() => {
     const interval = setInterval(() => {
       speedHistory = [...speedHistory.slice(1), totalSpeed];
     }, 1000);
-    
     connect();
     window.addEventListener('focus', checkClipboard);
     window.addEventListener('dragover', handleDragOver);
@@ -336,6 +352,14 @@
       window.removeEventListener('keydown', handleGlobalKeydown);
     };
   });
+
+  function formatBytes(bytes: number) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
 </script>
 
 {#if isDragging}
@@ -669,18 +693,18 @@
 
                 <div class="flex gap-2 mt-1">
                   <!-- Feature 8: Queue Management -->
-                  {#if download.status === 'downloading'}
-                    <button class="btn btn-xs btn-ghost text-yellow-400" on:click={() => controlDownload(download.id, 'pause')}>Pause</button>
-                  {:else if download.status === 'paused'}
-                    <button class="btn btn-xs btn-ghost text-green-400" on:click={() => controlDownload(download.id, 'resume')}>Resume</button>
-                  {/if}
-                  
                   {#if download.status === 'queued'}
                     <button class="btn btn-xs btn-ghost text-neon-blue" on:click={() => moveToTop(download.id)} title="Move to Top">
                       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
                       </svg>
                     </button>
+                  {/if}
+
+                  {#if download.status === 'downloading'}
+                    <button class="btn btn-xs btn-ghost text-yellow-400" on:click={() => controlDownload(download.id, 'pause')}>Pause</button>
+                  {:else if download.status === 'paused'}
+                    <button class="btn btn-xs btn-ghost text-green-400" on:click={() => controlDownload(download.id, 'resume')}>Resume</button>
                   {/if}
                   
                   {#if ['queued', 'downloading', 'paused'].includes(download.status)}
