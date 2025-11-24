@@ -157,8 +157,7 @@
               <span class="text-[var(--text-color)]">{formatBytes(systemStats.system.memory.total - systemStats.system.memory.free)} / {formatBytes(systemStats.system.memory.total)}</span>
             </div>
             <div class="w-full bg-gray-700 rounded-full h-2.5">
-              {@const memPct = ((systemStats.system.memory.total - systemStats.system.memory.free) / systemStats.system.memory.total) * 100}
-              <div class="bg-neon-blue h-2.5 rounded-full" style="width: {memPct}%"></div>
+              <div class="bg-neon-blue h-2.5 rounded-full" style="width: {((systemStats.system.memory.total - systemStats.system.memory.free) / systemStats.system.memory.total) * 100}%"></div>
             </div>
           </div>
         </div>

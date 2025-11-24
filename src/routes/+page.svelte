@@ -629,7 +629,6 @@
                   <button class="btn btn-xs btn-ghost text-[var(--text-muted)]" on:click={() => openLogs(download.id)}>Logs</button>
                 </div>
               </div>
-            </div>
           </div>
         {/each}
       </div>

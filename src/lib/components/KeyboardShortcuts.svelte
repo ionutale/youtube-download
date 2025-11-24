@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
 
   let show = false;
@@ -7,8 +7,8 @@
     show = !show;
   }
 
-  function handleKeydown(e) {
-    if (e.key === '?' && !e.target.matches('input, textarea')) {
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === '?' && e.target instanceof Element && !e.target.matches('input, textarea')) {
       toggle();
     }
     if (e.key === 'Escape' && show) {
@@ -23,7 +23,11 @@
 </script>
 
 {#if show}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" on:click={toggle}>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="glass-panel p-8 rounded-2xl max-w-md w-full" on:click|stopPropagation>
       <h2 class="text-2xl font-bold mb-6 flex items-center gap-2">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-neon-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
