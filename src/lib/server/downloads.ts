@@ -2,7 +2,8 @@ import { EventEmitter } from 'events';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
-import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR, MAX_CONCURRENCY, RETENTION_DAYS } from './config';
+import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR, MAX_CONCURRENCY } from './config';
+import { getServerSettings } from './settings';
 import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload, dbDeleteByRel } from './db';
 import { spawn } from 'child_process';
 import { pipeline } from 'stream/promises';
@@ -85,15 +86,17 @@ class DownloadsManager extends EventEmitter {
   }
 
   private scheduleCleanup() {
-    if (RETENTION_DAYS <= 0) return;
-    console.log('[downloads] scheduling cleanup every 1h, retention=%d days', RETENTION_DAYS);
+    const days = getServerSettings().retentionDays;
+    if (days <= 0) return;
+    console.log('[downloads] scheduling cleanup every 1h, retention=%d days', days);
     setInterval(() => this.cleanup(), 60 * 60 * 1000);
     this.cleanup(); // run once on startup
   }
 
   private cleanup() {
-    if (RETENTION_DAYS <= 0) return;
-    const cutoff = Date.now() - (RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const days = getServerSettings().retentionDays;
+    if (days <= 0) return;
+    const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
     console.log('[downloads] running cleanup, cutoff=%s', new Date(cutoff).toISOString());
     
     const toDelete: string[] = [];

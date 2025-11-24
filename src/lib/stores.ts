@@ -15,7 +15,8 @@ const defaultSettings = {
   downloadSubtitles: false,
   rateLimit: '',
   organizeByUploader: false,
-  splitChapters: false
+  splitChapters: false,
+  primaryColor: '#00ffff' // neon-blue
 };
 
 const stored = browser ? JSON.parse(localStorage.getItem('settings') || '{}') : {};

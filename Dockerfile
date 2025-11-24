@@ -27,11 +27,14 @@ ENV DOWNLOAD_DIR=/data
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Install runtime tools: ffmpeg and yt-dlp for robust downloads
-# Use apt to install yt-dlp to avoid PEP 668 externally-managed-environment errors with pip
+# Install runtime tools: ffmpeg, curl (for healthcheck & downloading yt-dlp), and ca-certificates
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends ffmpeg yt-dlp \
+	&& apt-get install -y --no-install-recommends ffmpeg curl ca-certificates python3 \
 	&& rm -rf /var/lib/apt/lists/*
+
+# Install latest yt-dlp directly
+RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod a+rx /usr/local/bin/yt-dlp
 
 # Only copy production files
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml ./

@@ -1,103 +1,111 @@
-# YouTube Downloader (SvelteKit)
+# 🚀 Ultimate YouTube Downloader
 
-A simple YouTube downloader with progress streaming, history, and file serving.
+A modern, feature-rich YouTube downloader built with **SvelteKit**, **TailwindCSS**, and **yt-dlp**. Designed for speed, usability, and aesthetics.
 
-## Creating a project
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![SvelteKit](https://img.shields.io/badge/sveltekit-2.0-orange.svg)
+![Docker](https://img.shields.io/badge/docker-ready-blue.svg)
 
-If you're seeing this, you've probably already done this step. Congrats!
+## ✨ Features
+
+### 🎨 Modern UI/UX
+- **Glassmorphism Design**: Beautiful, responsive interface with neon accents.
+- **Real-time Progress**: Live progress bars, speed, and ETA updates via Server-Sent Events (SSE).
+- **Themes**: Dark/Light mode and customizable accent colors.
+- **Mobile Responsive**: Works perfectly on desktop, tablet, and mobile.
+- **Keyboard Shortcuts**: Power user shortcuts for quick actions (`?` for help).
+
+### 📥 Advanced Downloading
+- **Format Support**: MP4, MKV, WEBM, and MP3 (audio only).
+- **Quality Control**: Select from 4K, 2K, 1080p, down to 480p, or specific audio bitrates (320k, 256k, etc.).
+- **Batch Mode**: Download multiple videos at once by pasting a list of URLs.
+- **Playlist Support**: Automatically expands playlists and queues videos.
+- **Metadata**: Embeds thumbnails, titles, and metadata into files.
+- **Subtitles**: Option to download and embed subtitles.
+- **SponsorBlock**: Automatically skip non-music/sponsor segments.
+
+### 🛠️ Power Tools
+- **Video Trimming**: Download specific time ranges (Start/End time).
+- **Audio Normalization**: Normalize audio levels (Loudnorm).
+- **Chapter Splitting**: Split long videos into separate files based on chapters.
+- **Organization**: Automatically organize files into folders by Uploader/Channel.
+- **Custom Filenames**: Define your own naming patterns (e.g., `{uploader} - {date} - {title}`).
+
+### ⚙️ System & Management
+- **Queue Management**: Pause, Resume, Cancel, and Retry downloads.
+- **History**: Searchable history with "Redownload" and "Delete" options.
+- **Library**: Browse, filter, and play downloaded files directly in the browser.
+- **System Status**: Monitor disk usage, memory, and uptime.
+- **Auto-Cleanup**: Automatically delete old downloads after a configurable number of days.
+- **Network**: Proxy support, Rate limiting, and Cookie support (for age-restricted content).
+
+## 🚀 Getting Started
+
+### Docker (Recommended)
+
+The easiest way to run the application is using Docker Compose.
 
 ```bash
-# create a new project in the current directory
-npx sv create
+# Clone the repository
+git clone https://github.com/ionutale/youtube-download.git
+cd youtube-download
 
-# create a new project in my-app
-npx sv create my-app
+# Start the container
+docker compose up -d
 ```
 
-## Developing
+Open [http://localhost:3000](http://localhost:3000) in your browser. Files will be saved to the `./download` directory.
 
-Install deps and run dev server:
+### Local Development
+
+Prerequisites: `Node.js 18+`, `pnpm`, `ffmpeg`, and `yt-dlp` must be installed on your system.
 
 ```bash
+# Install dependencies
 pnpm install
+
+# Start development server
 pnpm run dev
 ```
 
-### Persistence (SQLite + Fallback)
+## 🔧 Configuration
 
-- This app persists downloads to SQLite at `download/ytdl.db` via `better-sqlite3`.
-- If native bindings are unavailable at runtime (common on fresh Node upgrades), the app logs a warning and falls back to JSON files in `download/` so development remains unblocked.
+### Environment Variables
 
-Fix native bindings on macOS/Node 24 (darwin/arm64):
+Create a `.env` file in the root directory:
 
-```bash
-# Ensure Xcode Command Line Tools are installed
-xcode-select --install || true
-
-# Rebuild native bindings for the current Node version
-pnpm rebuild better-sqlite3
-
-# Verify it loads
-node -e "require('better-sqlite3'); console.log('better-sqlite3 loaded')"
+```env
+DOWNLOAD_DIR=download       # Directory to save files
+MAX_CONCURRENCY=2           # Max simultaneous downloads
+PROGRESS_INTERVAL_MS=200    # Progress update frequency
+DEFAULT_QUALITY=highest     # Default video quality
+DEFAULT_FORMAT=mp4          # Default format
+RETENTION_DAYS=0            # Auto-delete files after X days (0 = disabled)
 ```
 
-Tip: If you switched Node versions (e.g., via `nvm`), reinstall deps:
+### Settings UI
 
-```bash
-rm -rf node_modules pnpm-lock.yaml
-pnpm install
-pnpm rebuild better-sqlite3
-```
+Most configurations can be changed at runtime via the **Settings** page:
+- **File Naming**: Set patterns like `{title}` or `{uploader}/{title}`.
+- **Network**: Configure Proxy and Rate Limits.
+- **Cookies**: Paste Netscape-formatted cookies to access restricted content.
+- **Appearance**: Change accent colors.
 
-### Docker
+## ⌨️ Keyboard Shortcuts
 
-Build and run locally:
+| Key | Action |
+| :--- | :--- |
+| `Enter` | Start Download |
+| `/` | Focus Input |
+| `?` | Show Shortcuts Help |
+| `Esc` | Close Modals |
 
-```bash
-docker compose up --build
-# then open http://localhost:3000
-```
+## 🏗️ Tech Stack
 
-Manual build/run without compose:
+- **Frontend**: SvelteKit, TailwindCSS, DaisyUI, Lucide Icons
+- **Backend**: Node.js, Better-SQLite3 (persistence), EventSource (SSE)
+- **Core**: yt-dlp (download engine), ffmpeg (processing)
 
-```bash
-docker build -t youtube-download .
-docker run --rm -p 3000:3000 -e DOWNLOAD_DIR=/data -v "$PWD/download":/data youtube-download
-```
+## 📝 License
 
-Notes:
-- Image uses Node 22 Alpine and the Node adapter. The app listens on `0.0.0.0:3000`.
-- The `download/` directory is mounted to `/data` for persistence, and SQLite DB is stored there.
-
-## Environment
-
-Copy `.env.example` to `.env` and adjust as needed:
-
-```
-DOWNLOAD_DIR=download
-MAX_CONCURRENCY=2
-PROGRESS_INTERVAL_MS=200
-DEFAULT_QUALITY=highest
-DEFAULT_FORMAT=mp4
-```
-
-## Building
-
-To create a production version of your app:
-
-```bash
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-## API and Routes
-
-- `POST /api/download?url=<u>&quality=<q>&format=<mp3|mp4>` — start download
-- `GET /api/download?url=<u>&quality=<q>` — fetch video info
-- `GET /api/events` — Server-Sent Events for progress updates
-- `GET /api/history` — list downloaded items
-- `DELETE /api/history?rel=<relative>` — delete an item by relative path
-- `GET /files/<relative>` — serve downloaded file with range support
-
-> For deployment, install a SvelteKit adapter, e.g. `@sveltejs/adapter-node`.
+MIT

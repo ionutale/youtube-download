@@ -1,6 +1,7 @@
-<script>
+<script lang="ts">
   import { settings } from '$lib/stores';
   import { onMount } from 'svelte';
+  import { toast } from 'svelte-sonner';
 
   let pattern = $settings.filenamePattern;
   let proxyUrl = $settings.proxyUrl || '';
@@ -10,6 +11,47 @@
   let rateLimit = $settings.rateLimit || '';
   let organizeByUploader = $settings.organizeByUploader || false;
   let splitChapters = $settings.splitChapters || false;
+  let primaryColor = $settings.primaryColor || '#00ffff';
+
+  // System Stats
+  let systemStats: any = null;
+  let retentionDays = 0;
+
+  onMount(async () => {
+    loadSystemStats();
+  });
+
+  async function loadSystemStats() {
+    try {
+      const res = await fetch('/api/system');
+      const data = await res.json();
+      systemStats = data;
+      retentionDays = data.settings.retentionDays;
+    } catch (e) {
+      console.error('Failed to load system stats', e);
+    }
+  }
+
+  async function saveRetention() {
+    try {
+      await fetch('/api/system', {
+        method: 'POST',
+        body: JSON.stringify({ retentionDays }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success('Retention settings saved');
+    } catch {
+      toast.error('Failed to save settings');
+    }
+  }
+
+  function formatBytes(bytes: number) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
 
   function save() {
     settings.update(s => ({ 
@@ -21,7 +63,8 @@
       downloadSubtitles,
       rateLimit,
       organizeByUploader,
-      splitChapters
+      splitChapters,
+      primaryColor
     }));
   }
 
@@ -34,7 +77,8 @@
         downloadSubtitles !== $settings.downloadSubtitles ||
         rateLimit !== $settings.rateLimit ||
         organizeByUploader !== $settings.organizeByUploader ||
-        splitChapters !== $settings.splitChapters) {
+        splitChapters !== $settings.splitChapters ||
+        primaryColor !== $settings.primaryColor) {
       save();
     }
   }
@@ -44,6 +88,106 @@
   <h1 class="text-3xl font-bold text-[var(--text-color)] mb-8">Settings</h1>
 
   <div class="glass-panel rounded-2xl p-6 space-y-8">
+    <!-- Appearance -->
+    <section>
+      <h2 class="text-xl font-semibold text-[var(--text-color)] mb-4 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-neon-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+        </svg>
+        Appearance
+      </h2>
+      
+      <div class="form-control w-full max-w-xs">
+        <label class="label">
+          <span class="label-text text-[var(--text-muted)]">Accent Color</span>
+        </label>
+        <div class="flex gap-2">
+          <input 
+            type="color" 
+            bind:value={primaryColor} 
+            class="input input-bordered w-12 p-1 h-10 bg-[var(--input-bg)] border-[var(--glass-border)]" 
+          />
+          <input 
+            type="text" 
+            bind:value={primaryColor} 
+            class="input input-bordered flex-1 bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- System Status (Feature 42 & 43) -->
+    <section>
+      <h2 class="text-xl font-semibold text-[var(--text-color)] mb-4 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-neon-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+        </svg>
+        System Status
+      </h2>
+
+      {#if systemStats}
+        <div class="text-xs font-mono text-[var(--text-muted)] mb-4 bg-black/20 p-2 rounded border border-[var(--glass-border)] truncate">
+          Location: {systemStats.system.downloadDir}
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <!-- Disk Usage -->
+          <div class="bg-black/20 rounded-xl p-4">
+            <div class="flex justify-between text-sm mb-2">
+              <span class="text-[var(--text-muted)]">Storage Usage</span>
+              <span class="text-[var(--text-color)]">{formatBytes(systemStats.stats.totalBytes)} used</span>
+            </div>
+            <div class="w-full bg-gray-700 rounded-full h-2.5">
+              <!-- We don't have total disk size easily without a library, so we just show used as a bar relative to free+used if available, or just a visual -->
+              {#if systemStats.stats.freeBytes}
+                {@const total = systemStats.stats.totalBytes + systemStats.stats.freeBytes}
+                {@const pct = (systemStats.stats.totalBytes / total) * 100}
+                <div class="bg-neon-pink h-2.5 rounded-full" style="width: {pct}%"></div>
+                <div class="text-xs text-right mt-1 text-[var(--text-muted)]">{formatBytes(systemStats.stats.freeBytes)} free</div>
+              {:else}
+                <div class="bg-neon-pink h-2.5 rounded-full w-full animate-pulse"></div>
+              {/if}
+            </div>
+          </div>
+
+          <!-- Memory Usage -->
+          <div class="bg-black/20 rounded-xl p-4">
+            <div class="flex justify-between text-sm mb-2">
+              <span class="text-[var(--text-muted)]">Memory Usage</span>
+              <span class="text-[var(--text-color)]">{formatBytes(systemStats.system.memory.total - systemStats.system.memory.free)} / {formatBytes(systemStats.system.memory.total)}</span>
+            </div>
+            <div class="w-full bg-gray-700 rounded-full h-2.5">
+              {@const memPct = ((systemStats.system.memory.total - systemStats.system.memory.free) / systemStats.system.memory.total) * 100}
+              <div class="bg-neon-blue h-2.5 rounded-full" style="width: {memPct}%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auto Cleanup -->
+        <div class="form-control w-full max-w-md">
+          <label class="label">
+            <span class="label-text text-[var(--text-muted)]">Auto-delete downloads after (days)</span>
+          </label>
+          <div class="flex gap-2">
+            <input 
+              type="number" 
+              bind:value={retentionDays} 
+              min="0"
+              class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+            />
+            <button class="btn btn-primary" on:click={saveRetention}>Save</button>
+          </div>
+          <label class="label">
+            <span class="label-text-alt text-[var(--text-muted)]">Set to 0 to disable auto-cleanup.</span>
+          </label>
+        </div>
+      {:else}
+        <div class="flex justify-center p-4">
+          <span class="loading loading-dots loading-md text-neon-blue"></span>
+        </div>
+      {/if}
+    </section>
+
     <!-- Naming Pattern -->
     <section>
       <h2 class="text-xl font-semibold text-[var(--text-color)] mb-4 flex items-center gap-2">
@@ -60,12 +204,12 @@
         <input 
           type="text" 
           bind:value={pattern} 
-          placeholder="{title}" 
+          placeholder={'{title}'} 
           class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
         />
         <label class="label">
           <span class="label-text-alt text-[var(--text-muted)]">
-            Available variables: <code class="bg-black/20 px-1 rounded">{title}</code>, <code class="bg-black/20 px-1 rounded">{id}</code>, <code class="bg-black/20 px-1 rounded">{uploader}</code>, <code class="bg-black/20 px-1 rounded">{date}</code>
+            Available variables: <code class="bg-black/20 px-1 rounded">{'{title}'}</code>, <code class="bg-black/20 px-1 rounded">{'{id}'}</code>, <code class="bg-black/20 px-1 rounded">{'{uploader}'}</code>, <code class="bg-black/20 px-1 rounded">{'{date}'}</code>
           </span>
         </label>
       </div>
@@ -189,6 +333,35 @@
             </div>
           </label>
         </div>
+      </div>
+    </section>
+
+    <!-- Danger Zone -->
+    <section class="border-t border-red-900/30 pt-6">
+      <h2 class="text-xl font-semibold text-red-400 mb-4 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        Danger Zone
+      </h2>
+      
+      <div class="flex items-center justify-between p-4 border border-red-900/30 rounded-xl bg-red-900/10">
+        <div>
+          <h3 class="font-bold text-red-200">Clear All History</h3>
+          <p class="text-xs text-red-300/70">Permanently delete all download records and files.</p>
+        </div>
+        <button 
+          class="btn btn-error btn-sm text-white"
+          on:click={async () => {
+            if(confirm('Are you sure? This will delete ALL files.')) {
+              await fetch('/api/history?all=true', { method: 'DELETE' });
+              toast.success('History cleared');
+              loadSystemStats(); // refresh stats
+            }
+          }}
+        >
+          Clear Everything
+        </button>
       </div>
     </section>
   </div>

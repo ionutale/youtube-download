@@ -2,6 +2,9 @@
   import '../app.css';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { settings } from '$lib/stores';
+  import { Toaster } from 'svelte-sonner';
+  import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 
   let theme = 'dark';
 
@@ -14,10 +17,19 @@
     theme = theme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
+    settings.update(s => ({ ...s, theme }));
   }
+
+  $: primaryColor = $settings.primaryColor || '#00ffff';
 </script>
 
-<div class="flex h-screen bg-[var(--bg-color)] text-[var(--text-color)] overflow-hidden selection:bg-neon-pink selection:text-white transition-colors duration-300">
+<div 
+  class="flex h-screen bg-[var(--bg-color)] text-[var(--text-color)] overflow-hidden selection:bg-neon-pink selection:text-white transition-colors duration-300"
+  style="--color-neon-blue: {primaryColor};"
+>
+  <Toaster position="top-center" theme={theme === 'dark' ? 'dark' : 'light'} />
+  <KeyboardShortcuts />
+  
   <!-- Sidebar -->
   <aside class="w-20 lg:w-64 flex-shrink-0 glass-panel border-r border-[var(--glass-border)] flex flex-col transition-all duration-300 z-20">
     <div class="h-20 flex items-center justify-center lg:justify-start lg:px-6 border-b border-[var(--glass-border)]">

@@ -37,21 +37,23 @@ export async function DELETE({ request }) {
 	return json({ success: true });
 }
 
-export async function POST({ url }) {
-	const videoUrl = url.searchParams.get('url');
-	const quality = url.searchParams.get('quality') || DEFAULT_QUALITY;
-	const format = (url.searchParams.get('format') as 'mp3' | 'mp4') || DEFAULT_FORMAT;
-	const filenamePattern = url.searchParams.get('filenamePattern') || undefined;
-	const startTime = url.searchParams.get('startTime') || undefined;
-	const endTime = url.searchParams.get('endTime') || undefined;
-	const normalize = url.searchParams.get('normalize') === 'true';
-	const cookieContent = url.searchParams.get('cookieContent') || undefined;
-	const proxyUrl = url.searchParams.get('proxyUrl') || undefined;
-	const useSponsorBlock = url.searchParams.get('useSponsorBlock') === 'true';
-	const downloadSubtitles = url.searchParams.get('downloadSubtitles') === 'true';
-	const rateLimit = url.searchParams.get('rateLimit') || undefined;
-	const organizeByUploader = url.searchParams.get('organizeByUploader') === 'true';
-	const splitChapters = url.searchParams.get('splitChapters') === 'true';
+export async function POST({ request }) {
+	const body = await request.json().catch(() => ({}));
+	
+	const videoUrl = body.url;
+	const quality = body.quality || DEFAULT_QUALITY;
+	const format = (body.format as 'mp3' | 'mp4') || DEFAULT_FORMAT;
+	const filenamePattern = body.filenamePattern || undefined;
+	const startTime = body.startTime || undefined;
+	const endTime = body.endTime || undefined;
+	const normalize = body.normalize === 'true' || body.normalize === true;
+	const cookieContent = body.cookieContent || undefined;
+	const proxyUrl = body.proxyUrl || undefined;
+	const useSponsorBlock = body.useSponsorBlock === 'true' || body.useSponsorBlock === true;
+	const downloadSubtitles = body.downloadSubtitles === 'true' || body.downloadSubtitles === true;
+	const rateLimit = body.rateLimit || undefined;
+	const organizeByUploader = body.organizeByUploader === 'true' || body.organizeByUploader === true;
+	const splitChapters = body.splitChapters === 'true' || body.splitChapters === true;
 
 	console.log('[POST /api/download] url=%s quality=%s format=%s', videoUrl, quality, format);
 	if (!videoUrl) return json({ error: 'URL is required' }, { status: 400 });

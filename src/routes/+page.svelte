@@ -179,22 +179,28 @@
     let started = 0;
     for (const targetUrl of urls) {
       try {
-        const params = new URLSearchParams({
+        const body = {
           url: targetUrl,
           format,
           quality,
           filenamePattern: $settings.filenamePattern || '{title}',
           startTime,
           endTime,
-          normalize: String(normalizeAudio),
+          normalize: normalizeAudio,
           cookieContent: $settings.cookieContent || '',
           proxyUrl: $settings.proxyUrl || '',
-          useSponsorBlock: String($settings.useSponsorBlock || false),
-          downloadSubtitles: String($settings.downloadSubtitles || false),
-          rateLimit: $settings.rateLimit || ''
+          useSponsorBlock: $settings.useSponsorBlock || false,
+          downloadSubtitles: $settings.downloadSubtitles || false,
+          rateLimit: $settings.rateLimit || '',
+          organizeByUploader: $settings.organizeByUploader || false,
+          splitChapters: $settings.splitChapters || false
+        };
+        
+        const res = await fetch('/api/download', { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
         });
-        const postUrl = `/api/download?${params.toString()}`;
-        const res = await fetch(postUrl, { method: 'POST' });
         
         if (!res.ok) {
           const err = await res.json();
@@ -217,6 +223,14 @@
     if (e.key === 'Enter' && !e.shiftKey && !batchMode && url) {
       e.preventDefault();
       startDownload();
+    }
+  }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // Feature 45: Keyboard Shortcuts
+    if (e.key === '/' && document.activeElement !== inputElement && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      inputElement?.focus();
     }
   }
 
@@ -307,12 +321,14 @@
     window.addEventListener('dragover', handleDragOver);
     window.addEventListener('dragleave', handleDragLeave);
     window.addEventListener('drop', handleDrop);
+    window.addEventListener('keydown', handleGlobalKeydown);
     return () => {
       if (eventSource) eventSource.close();
       window.removeEventListener('focus', checkClipboard);
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('drop', handleDrop);
+      window.removeEventListener('keydown', handleGlobalKeydown);
     };
   });
 </script>

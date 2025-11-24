@@ -12,7 +12,14 @@ export async function GET() {
 export async function DELETE({ url }) {
   const rel = url.searchParams.get('rel');
   const id = url.searchParams.get('id');
+  const all = url.searchParams.get('all') === 'true';
   
+  if (all) {
+    const allItems = downloadsManager.list().filter(d => d.status === 'completed' || d.status === 'failed' || d.status === 'canceled');
+    downloadsManager.delete(allItems.map(d => d.id));
+    return new Response(null, { status: 204 });
+  }
+
   if (id) {
     downloadsManager.delete([id]);
     return new Response(null, { status: 204 });
