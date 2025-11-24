@@ -20,7 +20,10 @@ const defaultSettings = {
   videoCodec: 'default', // default, h264, hevc
   embedMetadata: true,
   embedThumbnail: true,
-  primaryColor: '#00ffff' // neon-blue
+  primaryColor: '#00ffff', // neon-blue
+  language: 'en',
+  cloudSyncEnabled: false,
+  cloudProvider: 'google_drive' // google_drive, dropbox, s3
 };
 
 const stored = browser ? JSON.parse(localStorage.getItem('settings') || '{}') : {};

@@ -16,6 +16,7 @@
   let embedMetadata = $settings.embedMetadata !== false; // Default true
   let embedThumbnail = $settings.embedThumbnail !== false; // Default true
   let primaryColor = $settings.primaryColor || '#00ffff';
+  let language = $settings.language || 'en';
 
   // System Stats
   let systemStats: any = null;
@@ -26,7 +27,14 @@
   let scheduleEnd = '06:00';
   let maxConcurrency = 2;
   let userAgent = '';
+
   let maxRetries = 0;
+  let cloudSyncEnabled = false;
+  let cloudProvider = 'google_drive';
+  let apiKey = '';
+  let showKey = false;
+  let rssFeeds: string[] = [];
+  let newFeedUrl = '';
 
   onMount(async () => {
     loadSystemStats();
@@ -44,7 +52,13 @@
       scheduleEnd = data.settings.scheduleEnd || '06:00';
       maxConcurrency = data.settings.maxConcurrency || 2;
       userAgent = data.settings.userAgent || '';
+
       maxRetries = data.settings.maxRetries || 0;
+      cloudSyncEnabled = data.settings.cloudSyncEnabled || false;
+      cloudProvider = data.settings.cloudProvider || 'google_drive';
+
+      apiKey = data.settings.apiKey || '';
+      rssFeeds = data.settings.rssFeeds || [];
     } catch (e) {
       console.error('Failed to load system stats', e);
     }
@@ -62,13 +76,66 @@
           scheduleEnd,
           maxConcurrency,
           userAgent,
-          maxRetries
+
+          maxRetries,
+          cloudSyncEnabled,
+          cloudProvider
         }),
         headers: { 'Content-Type': 'application/json' }
       });
       toast.success('System settings saved');
     } catch {
       toast.error('Failed to save settings');
+    }
+  }
+
+
+
+  async function addFeed() {
+    if (!newFeedUrl) return;
+    try {
+      await fetch('/api/system/rss', {
+        method: 'POST',
+        body: JSON.stringify({ url: newFeedUrl }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      rssFeeds = [...rssFeeds, newFeedUrl];
+      newFeedUrl = '';
+      toast.success('Feed added');
+    } catch {
+      toast.error('Failed to add feed');
+    }
+  }
+
+  async function removeFeed(url: string) {
+    try {
+      await fetch(`/api/system/rss?url=${encodeURIComponent(url)}`, { method: 'DELETE' });
+      rssFeeds = rssFeeds.filter(f => f !== url);
+      toast.success('Feed removed');
+    } catch {
+      toast.error('Failed to remove feed');
+    }
+  }
+
+  async function generateKey() {
+    try {
+      const res = await fetch('/api/system/auth', { method: 'POST' });
+      const data = await res.json();
+      apiKey = data.apiKey;
+      toast.success('New API Key generated');
+    } catch {
+      toast.error('Failed to generate key');
+    }
+  }
+
+  async function revokeKey() {
+    if (!confirm('Revoke API Key? External tools will stop working.')) return;
+    try {
+      await fetch('/api/system/auth', { method: 'DELETE' });
+      apiKey = '';
+      toast.success('API Key revoked');
+    } catch {
+      toast.error('Failed to revoke key');
     }
   }
 
@@ -95,7 +162,8 @@
       videoCodec,
       embedMetadata,
       embedThumbnail,
-      primaryColor
+      primaryColor,
+      language
     }));
   }
 
@@ -113,7 +181,8 @@
         videoCodec !== $settings.videoCodec ||
         embedMetadata !== $settings.embedMetadata ||
         embedThumbnail !== $settings.embedThumbnail ||
-        primaryColor !== $settings.primaryColor) {
+        primaryColor !== $settings.primaryColor ||
+        language !== $settings.language) {
       save();
     }
   }
@@ -148,6 +217,17 @@
             class="input input-bordered flex-1 bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
         </div>
+        </div>
+
+
+      <div class="form-control w-full max-w-xs mt-4">
+        <label class="label">
+          <span class="label-text text-[var(--text-muted)]">Language</span>
+        </label>
+        <select bind:value={language} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
+          <option value="en">English</option>
+          <option value="it">Italiano</option>
+        </select>
       </div>
     </section>
 
@@ -207,7 +287,7 @@
               type="number" 
               bind:value={retentionDays} 
               min="0"
-              class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+              class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
             />
           </div>
           <label class="label">
@@ -225,12 +305,34 @@
               type="text" 
               bind:value={webhookUrl} 
               placeholder="https://discord.com/api/webhooks/..." 
-              class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+              class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
             />
           </div>
           <label class="label">
             <span class="label-text-alt text-[var(--text-muted)]">Send POST request on completion/failure.</span>
           </label>
+        </div>
+
+        <!-- Cloud Sync (Feature 46) -->
+        <div class="form-control w-full max-w-md mt-4 border-t border-[var(--glass-border)] pt-4">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input type="checkbox" class="toggle toggle-primary" bind:checked={cloudSyncEnabled} />
+            <div class="flex flex-col">
+              <span class="label-text text-[var(--text-color)] font-bold">Cloud Sync</span>
+              <span class="label-text-alt text-[var(--text-muted)]">Automatically upload completed files</span>
+            </div>
+          </label>
+          
+          {#if cloudSyncEnabled}
+            <div class="form-control w-full mt-2">
+              <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Provider</span></label>
+              <select bind:value={cloudProvider} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
+                <option value="google_drive">Google Drive</option>
+                <option value="dropbox">Dropbox</option>
+                <option value="s3">Amazon S3</option>
+              </select>
+            </div>
+          {/if}
         </div>
 
         <!-- Scheduled Downloads (Feature 49) -->
@@ -247,11 +349,11 @@
             <div class="flex gap-4 mt-2">
               <div class="form-control w-full">
                 <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Start Time</span></label>
-                <input type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+                <input type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
               </div>
               <div class="form-control w-full">
                 <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">End Time</span></label>
-                <input type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+                <input type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
               </div>
             </div>
           {/if}
@@ -311,6 +413,52 @@
       {/if}
     </section>
 
+
+
+    <!-- Security (Feature 42) -->
+    <section>
+      <h2 class="text-xl font-semibold text-[var(--text-color)] mb-4 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-neon-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+        Security
+      </h2>
+
+      <div class="form-control w-full max-w-md">
+        <label class="label">
+          <span class="label-text text-[var(--text-color)] font-bold">API Key</span>
+        </label>
+        
+        {#if apiKey}
+          <div class="flex gap-2">
+            <input 
+              type={showKey ? "text" : "password"} 
+              value={apiKey} 
+              readonly
+              class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full font-mono text-sm" 
+            />
+            <button class="btn btn-square btn-ghost text-[var(--text-muted)]" on:click={() => showKey = !showKey}>
+              {#if showKey}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+              {:else}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+              {/if}
+            </button>
+          </div>
+          <div class="mt-2 flex gap-2">
+            <button class="btn btn-sm btn-error btn-outline" on:click={revokeKey}>Revoke Key</button>
+            <button class="btn btn-sm btn-ghost" on:click={() => { navigator.clipboard.writeText(apiKey); toast.success('Copied'); }}>Copy</button>
+          </div>
+        {:else}
+          <div class="text-sm text-[var(--text-muted)] mb-2">No API Key configured. External access is open (or restricted depending on network).</div>
+          <button class="btn btn-primary btn-sm" on:click={generateKey}>Generate API Key</button>
+        {/if}
+        <label class="label">
+          <span class="label-text-alt text-[var(--text-muted)]">Use <code>x-api-key</code> header for external tools.</span>
+        </label>
+      </div>
+    </section>
+
     <!-- Naming Pattern -->
     <section>
       <h2 class="text-xl font-semibold text-[var(--text-color)] mb-4 flex items-center gap-2">
@@ -328,7 +476,7 @@
           type="text" 
           bind:value={pattern} 
           placeholder={'{title}'} 
-          class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+          class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
         />
         <label class="label">
           <span class="label-text-alt text-[var(--text-muted)]">
@@ -350,6 +498,50 @@
       </div>
     </section>
 
+
+
+    <!-- RSS Feeds (Feature 45) -->
+    <section>
+      <h2 class="text-xl font-semibold text-[var(--text-color)] mb-4 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-neon-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 5c7.18 0 13 5.82 13 13M6 11a7 7 0 017 7m-6 0a1 1 0 11-2 0 1 1 0 012 0z" />
+        </svg>
+        RSS Feeds
+      </h2>
+      
+      <div class="form-control w-full max-w-md mb-4">
+        <label class="label">
+          <span class="label-text text-[var(--text-muted)]">Add YouTube RSS Feed</span>
+        </label>
+        <div class="flex gap-2">
+          <input 
+            type="text" 
+            bind:value={newFeedUrl} 
+            placeholder="https://www.youtube.com/feeds/videos.xml?channel_id=..." 
+            class="input input-bordered flex-1 bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+          />
+          <button class="btn btn-primary" on:click={addFeed}>Add</button>
+        </div>
+      </div>
+
+      {#if rssFeeds.length > 0}
+        <div class="space-y-2 max-w-md">
+          {#each rssFeeds as feed}
+            <div class="flex items-center justify-between p-3 rounded-lg bg-black/20 border border-[var(--glass-border)]">
+              <span class="text-sm text-[var(--text-color)] truncate flex-1 mr-2" title={feed}>{feed}</span>
+              <button class="btn btn-ghost btn-xs text-red-400 hover:bg-red-900/20" on:click={() => removeFeed(feed)}>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <p class="text-sm text-[var(--text-muted)]">No RSS feeds configured.</p>
+      {/if}
+    </section>
+
     <!-- Network Settings -->
     <section>
       <h2 class="text-xl font-semibold text-[var(--text-color)] mb-4 flex items-center gap-2">
@@ -369,7 +561,7 @@
             type="text" 
             bind:value={proxyUrl} 
             placeholder="http://user:pass@host:port" 
-            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
         </div>
 
@@ -382,7 +574,7 @@
             type="text" 
             bind:value={rateLimit} 
             placeholder="e.g. 5M, 500K" 
-            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
         </div>
 
@@ -396,7 +588,7 @@
             bind:value={maxConcurrency} 
             min="1"
             max="10"
-            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
         </div>
 
@@ -409,7 +601,7 @@
             type="text" 
             bind:value={userAgent} 
             placeholder="Mozilla/5.0..." 
-            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
         </div>
 
@@ -423,7 +615,7 @@
             bind:value={maxRetries} 
             min="0"
             max="10"
-            class="input input-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
+            class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
           <label class="label">
             <span class="label-text-alt text-[var(--text-muted)]">Number of times to retry failed downloads automatically.</span>
@@ -439,7 +631,7 @@
         <textarea 
           bind:value={cookieContent} 
           placeholder="# Netscape HTTP Cookie File..." 
-          class="textarea textarea-bordered bg-[var(--input-bg)] text-[var,--text-color)] border-[var(--glass-border)] focus:border-neon-blue h-32 font-mono text-xs"
+          class="textarea textarea-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue h-32 font-mono text-xs"
         ></textarea>
         <label class="label">
           <span class="label-text-alt text-[var(--text-muted)]">Paste content of cookies.txt here to access age-restricted videos.</span>
@@ -543,7 +735,7 @@
           <label class="label cursor-pointer justify-start gap-4">
             <input type="checkbox" class="toggle toggle-primary" bind:checked={embedThumbnail} />
             <div class="flex flex-col">
-              <span class="label-text text-[var,--text-color)] font-bold">Embed Thumbnail</span>
+              <span class="label-text text-[var(--text-color)] font-bold">Embed Thumbnail</span>
               <span class="label-text-alt text-[var(--text-muted)]">Set video thumbnail as file icon/cover art</span>
             </div>
           </label>

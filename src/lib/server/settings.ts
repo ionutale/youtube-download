@@ -13,6 +13,10 @@ export type ServerSettings = {
   maxConcurrency: number;
   userAgent?: string;
   maxRetries: number;
+  cloudSyncEnabled?: boolean;
+  cloudProvider?: string;
+  apiKey?: string;
+  rssFeeds?: string[];
 };
 
 const defaults: ServerSettings = {
@@ -23,7 +27,9 @@ const defaults: ServerSettings = {
   scheduleEnd: '06:00',
   maxConcurrency: 2,
   userAgent: '',
-  maxRetries: 0
+  maxRetries: 0,
+  cloudSyncEnabled: false,
+  cloudProvider: 'google_drive'
 };
 
 let cached: ServerSettings | null = null;

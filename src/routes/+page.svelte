@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { toast } from 'svelte-sonner';
   import { settings } from '$lib/stores';
+  import { t } from '$lib/i18n';
 
   let url = '';
   let batchMode = false;
@@ -377,10 +378,10 @@
   <!-- Hero Section -->
   <div class="flex flex-col items-center justify-center py-16 text-center space-y-6">
     <h1 class="text-5xl md:text-7xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[var(--text-color)] via-blue-100 to-[var(--text-color)] neon-text">
-      Download Your World
+      {$t('app.title')}
     </h1>
     <p class="text-lg text-[var(--text-muted)] max-w-2xl">
-      Save your favorite YouTube videos and music in seconds. <br class="hidden md:inline" />
+      {$t('app.subtitle')} <br class="hidden md:inline" />
       High quality, fast, and free.
     </p>
 
@@ -400,7 +401,8 @@
               bind:this={inputElement}
               bind:value={url}
               on:keydown={handleKeydown}
-              placeholder="Paste multiple URLs here (one per line)..."
+              on:keydown={handleKeydown}
+              placeholder={$t('input.placeholder')}
               class="w-full bg-transparent border-none focus:ring-0 text-[var(--text-color)] placeholder-[var(--text-muted)] px-4 py-3 text-lg min-h-[120px] resize-y"
             ></textarea>
           {:else}
@@ -409,7 +411,7 @@
               bind:value={url}
               on:keydown={handleKeydown}
               type="text"
-              placeholder="Paste YouTube URL here..."
+              placeholder={$t('input.placeholder')}
               class="w-full bg-transparent border-none focus:ring-0 text-[var(--text-color)] placeholder-[var(--text-muted)] px-4 py-3 text-lg"
             />
           {/if}
@@ -419,7 +421,7 @@
         <div class="flex items-center justify-between w-full px-2 pb-1 mt-2">
           <!-- Batch Mode Toggle (Feature 7) -->
           <label class="label cursor-pointer gap-2">
-            <span class="label-text text-xs text-[var(--text-muted)]">Batch Mode</span> 
+            <span class="label-text text-xs text-[var(--text-muted)]">{$t('label.batch_mode')}</span> 
             <input type="checkbox" class="toggle toggle-xs toggle-primary" bind:checked={batchMode} />
           </label>
 
@@ -453,7 +455,7 @@
               on:click={startDownload}
               class="btn btn-primary bg-gradient-to-r from-neon-blue to-neon-purple border-none text-white hover:scale-105 transition-transform shadow-lg shadow-neon-blue/20"
             >
-              {batchMode ? 'Download All' : 'Download'}
+              {batchMode ? $t('btn.download_all') : $t('btn.download')}
             </button>
           </div>
         </div>
@@ -461,7 +463,7 @@
         <!-- Advanced Options (Feature 12 & 13) -->
         <div class="w-full px-2 mt-1 border-t border-[var(--glass-border)] pt-2">
           <button class="text-xs text-[var(--text-muted)] hover:text-[var(--text-color)] flex items-center gap-1 w-full justify-center mb-2" on:click={() => showAdvanced = !showAdvanced}>
-            {showAdvanced ? 'Hide' : 'Show'} Advanced Options
+            {showAdvanced ? $t('label.hide') : $t('label.show')} {$t('label.advanced_options')}
             <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 transition-transform duration-200 {showAdvanced ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
             </svg>
@@ -471,16 +473,16 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pb-2">
                <!-- Time Range -->
                <div class="form-control">
-                 <div class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Start Time (00:00:00)</span></div>
+                 <div class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">{$t('label.start_time')} (00:00:00)</span></div>
                  <input type="text" bind:value={startTime} placeholder="e.g. 00:01:30" class="input input-sm input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
                </div>
                <div class="form-control">
-                 <div class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">End Time (00:00:00)</span></div>
+                 <div class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">{$t('label.end_time')} (00:00:00)</span></div>
                  <input type="text" bind:value={endTime} placeholder="e.g. 00:02:45" class="input input-sm input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
                </div>
                <!-- Category Input (Feature 32) -->
                <div class="form-control">
-                 <div class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Category</span></div>
+                 <div class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">{$t('label.category')}</span></div>
                  <input type="text" bind:value={category} placeholder="e.g. Music, Tutorial" list="categories-list" class="input input-sm input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
                  <datalist id="categories-list">
                    {#each availableCategories as cat}
@@ -492,7 +494,7 @@
                <div class="form-control justify-end">
                  <label class="label cursor-pointer justify-start gap-2">
                    <input type="checkbox" class="checkbox checkbox-sm checkbox-primary" bind:checked={normalizeAudio} />
-                   <span class="label-text text-[var(--text-muted)] text-sm">Normalize Audio</span>
+                   <span class="label-text text-[var(--text-muted)] text-sm">{$t('label.normalize')}</span>
                  </label>
                </div>
             </div>
@@ -508,7 +510,7 @@
       <div class="flex items-center gap-4">
         <h2 class="text-2xl font-bold flex items-center gap-2 text-[var(--text-color)]">
           <span class="w-2 h-8 rounded-full bg-neon-pink"></span>
-          Active Downloads
+          {$t('header.active_downloads')}
         </h2>
         
         <!-- Bulk Actions Toolbar -->
@@ -594,9 +596,9 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
         </div>
-        <p class="text-[var(--text-muted)] text-lg">No downloads found</p>
+        <p class="text-[var(--text-muted)] text-lg">{$t('msg.no_downloads')}</p>
         {#if !searchTerm}
-          <p class="text-[var(--text-muted)] text-sm mt-1">Paste a link above to get started</p>
+          <p class="text-[var(--text-muted)] text-sm mt-1">{$t('msg.paste_link')}</p>
         {/if}
       </div>
     {:else}
