@@ -6,6 +6,7 @@
   let loading = true;
   let searchTerm = '';
   let previewItem: any = null;
+  let selectedIds = new Set<string>();
 
   async function loadHistory() {
     loading = true;
@@ -24,6 +25,10 @@
     try {
       await fetch(`/api/history?id=${id}`, { method: 'DELETE' });
       history = history.filter(h => h.id !== id);
+      if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+        selectedIds = new Set(selectedIds);
+      }
       toast.success('Deleted');
     } catch {
       toast.error('Failed to delete');
@@ -48,9 +53,82 @@
     previewItem = null;
   }
 
+  function exportHistory() {
+    if (!history.length) {
+      toast.error('No history to export');
+      return;
+    }
+
+    const headers = ['Title', 'Format', 'Quality', 'URL', 'Date'];
+    const csvContent = [
+      headers.join(','),
+      ...history.map(item => [
+        `"${(item.title || '').replace(/"/g, '""')}"`,
+        item.format,
+        item.quality || '',
+        item.url,
+        new Date(item.createdAt).toISOString()
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `download_history_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('History exported');
+  }
+
+  function toggleSelection(id: string) {
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+    } else {
+      selectedIds.add(id);
+    }
+    selectedIds = new Set(selectedIds);
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === filteredHistory.length) {
+      selectedIds = new Set();
+    } else {
+      selectedIds = new Set(filteredHistory.map(h => h.id));
+    }
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} items?`)) return;
+
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await fetch('/api/history', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      
+      if (res.ok) {
+        history = history.filter(h => !selectedIds.has(h.id));
+        selectedIds = new Set();
+        toast.success('Deleted selected items');
+      } else {
+        toast.error('Failed to delete items');
+      }
+    } catch (e) {
+      toast.error('Error deleting items');
+    }
+  }
+
   $: filteredHistory = history.filter(h => 
     !searchTerm || (h.title && h.title.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+  
+  $: allSelected = filteredHistory.length > 0 && selectedIds.size === filteredHistory.length;
 
   onMount(loadHistory);
 </script>
@@ -62,20 +140,50 @@
         <span class="w-2 h-8 rounded-full bg-neon-blue"></span>
         History
       </h1>
-      <p class="text-gray-400 text-sm mt-1">Your download history</p>
+      <div class="flex items-center gap-4 mt-1">
+        <p class="text-gray-400 text-sm">Your download history</p>
+        
+        <!-- Bulk Actions Toolbar -->
+        {#if history.length > 0}
+          <div class="flex items-center gap-2 ml-4 border-l border-white/10 pl-4">
+            <label class="label cursor-pointer gap-2">
+              <input type="checkbox" class="checkbox checkbox-sm checkbox-primary" checked={allSelected} on:change={toggleSelectAll} />
+              <span class="label-text text-xs text-gray-400">Select All</span>
+            </label>
+            
+            {#if selectedIds.size > 0}
+              <button class="btn btn-xs btn-error text-white" on:click={deleteSelected}>
+                Delete ({selectedIds.size})
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </div>
     </div>
 
-    <!-- Search -->
-    <div class="relative w-full md:w-64">
-      <input 
-        type="text" 
-        bind:value={searchTerm}
-        placeholder="Search history..." 
-        class="input input-bordered bg-white/5 border-glass-border focus:border-neon-blue text-white w-full pl-10 rounded-xl"
-      />
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
+    <!-- Search & Export -->
+    <div class="flex gap-2 w-full md:w-auto">
+      <div class="relative w-full md:w-64">
+        <input 
+          type="text" 
+          bind:value={searchTerm}
+          placeholder="Search history..." 
+          class="input input-bordered bg-white/5 border-glass-border focus:border-neon-blue text-white w-full pl-10 rounded-xl"
+        />
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      </div>
+      <button 
+        on:click={exportHistory}
+        class="btn btn-square bg-white/5 border-glass-border hover:bg-neon-blue hover:text-white hover:border-neon-blue transition-all rounded-xl"
+        title="Export to CSV"
+        aria-label="Export History"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+      </button>
     </div>
   </div>
 
@@ -95,7 +203,18 @@
   {:else}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
       {#each filteredHistory as item (item.id)}
-        <div class="glass-panel rounded-2xl overflow-hidden group hover:border-neon-blue/50 transition-all duration-300 hover:-translate-y-1 flex flex-col">
+        <div class="glass-panel rounded-2xl overflow-hidden group hover:border-neon-blue/50 transition-all duration-300 hover:-translate-y-1 flex flex-col relative {selectedIds.has(item.id) ? 'ring-2 ring-neon-blue bg-white/5' : ''}">
+          
+          <!-- Selection Checkbox -->
+          <div class="absolute top-2 left-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity {selectedIds.has(item.id) ? 'opacity-100' : ''}">
+            <input 
+              type="checkbox" 
+              class="checkbox checkbox-sm checkbox-primary bg-black/50 border-white/20" 
+              checked={selectedIds.has(item.id)} 
+              on:change={() => toggleSelection(item.id)} 
+            />
+          </div>
+
           <!-- Thumbnail -->
           <div class="aspect-video bg-black/40 relative flex items-center justify-center group-hover:bg-black/30 transition-colors overflow-hidden">
             {#if item.thumbnail}
@@ -110,17 +229,17 @@
             
             <!-- Overlay Actions -->
             <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 backdrop-blur-sm">
-              <button on:click={() => openPreview(item)} class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-neon-blue hover:text-white transition-colors" title="Play">
+              <button on:click={() => openPreview(item)} class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-neon-blue hover:text-white transition-colors" title="Play" aria-label="Play">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                 </svg>
               </button>
-              <button on:click={() => redownload(item)} class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-neon-pink hover:text-white transition-colors" title="Redownload">
+              <button on:click={() => redownload(item)} class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-neon-pink hover:text-white transition-colors" title="Redownload" aria-label="Redownload">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
-              <button on:click={() => deleteItem(item.id)} class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-red-500 hover:text-white transition-colors" title="Delete">
+              <button on:click={() => deleteItem(item.id)} class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-red-500 hover:text-white transition-colors" title="Delete" aria-label="Delete">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>

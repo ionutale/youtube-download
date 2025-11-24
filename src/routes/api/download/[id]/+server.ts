@@ -29,6 +29,6 @@ export async function DELETE({ params }) {
   const id = params.id;
   if (!id) return json({ error: 'ID required' }, { status: 400 });
   
-  downloadsManager.cancel(id);
+  downloadsManager.delete([id]);
   return json({ success: true });
 }

@@ -16,6 +16,10 @@ const defaultSettings = {
   rateLimit: '',
   organizeByUploader: false,
   splitChapters: false,
+  downloadLyrics: false,
+  videoCodec: 'default', // default, h264, hevc
+  embedMetadata: true,
+  embedThumbnail: true,
   primaryColor: '#00ffff' // neon-blue
 };
 

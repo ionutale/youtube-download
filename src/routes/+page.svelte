@@ -179,6 +179,17 @@
     let started = 0;
     for (const targetUrl of urls) {
       try {
+        // Feature 39: Redownload Detection
+        const checkRes = await fetch(`/api/download?check=true&url=${encodeURIComponent(targetUrl)}`);
+        if (checkRes.ok) {
+           const checkData = await checkRes.json();
+           if (checkData.exists) {
+             if (!confirm(`The URL ${targetUrl} has already been downloaded. Download again?`)) {
+               continue;
+             }
+           }
+        }
+
         const body = {
           url: targetUrl,
           format,
@@ -193,7 +204,11 @@
           downloadSubtitles: $settings.downloadSubtitles || false,
           rateLimit: $settings.rateLimit || '',
           organizeByUploader: $settings.organizeByUploader || false,
-          splitChapters: $settings.splitChapters || false
+          splitChapters: $settings.splitChapters || false,
+          downloadLyrics: $settings.downloadLyrics || false,
+          videoCodec: $settings.videoCodec || 'default',
+          embedMetadata: $settings.embedMetadata !== false,
+          embedThumbnail: $settings.embedThumbnail !== false
         };
         
         const res = await fetch('/api/download', { 
@@ -268,18 +283,19 @@
 
   // Feature 28: Quick Retry
   async function retryDownload(id: string) {
-    // We need to find the download to get its URL/format/quality, but the API might not support retry directly by ID unless we implement it.
-    // The backend has a retry method but it's not exposed via API yet.
-    // Let's just re-queue it if we have the data locally.
-    const rec = downloads.find(d => d.id === id);
-    if (rec) {
-       try {
-        const postUrl = `/api/download?url=${encodeURIComponent(rec.url)}&format=${rec.format}&quality=${rec.quality || 'highest'}`;
-        await fetch(postUrl, { method: 'POST' });
+    try {
+      const res = await fetch(`/api/download/${id}`, { 
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'retry' }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (res.ok) {
         toast.success('Retrying download...');
-       } catch {
-         toast.error('Failed to retry');
-       }
+      } else {
+        toast.error('Failed to retry');
+      }
+    } catch {
+      toast.error('Failed to retry');
     }
   }
 

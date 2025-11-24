@@ -11,6 +11,10 @@
   let rateLimit = $settings.rateLimit || '';
   let organizeByUploader = $settings.organizeByUploader || false;
   let splitChapters = $settings.splitChapters || false;
+  let downloadLyrics = $settings.downloadLyrics || false;
+  let videoCodec = $settings.videoCodec || 'default';
+  let embedMetadata = $settings.embedMetadata !== false; // Default true
+  let embedThumbnail = $settings.embedThumbnail !== false; // Default true
   let primaryColor = $settings.primaryColor || '#00ffff';
 
   // System Stats
@@ -64,6 +68,10 @@
       rateLimit,
       organizeByUploader,
       splitChapters,
+      downloadLyrics,
+      videoCodec,
+      embedMetadata,
+      embedThumbnail,
       primaryColor
     }));
   }
@@ -78,6 +86,10 @@
         rateLimit !== $settings.rateLimit ||
         organizeByUploader !== $settings.organizeByUploader ||
         splitChapters !== $settings.splitChapters ||
+        downloadLyrics !== $settings.downloadLyrics ||
+        videoCodec !== $settings.videoCodec ||
+        embedMetadata !== $settings.embedMetadata ||
+        embedThumbnail !== $settings.embedThumbnail ||
         primaryColor !== $settings.primaryColor) {
       save();
     }
@@ -329,6 +341,54 @@
             <div class="flex flex-col">
               <span class="label-text text-[var(--text-color)] font-bold">Split Chapters</span>
               <span class="label-text-alt text-[var(--text-muted)]">Create separate files for each video chapter</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Lyrics (Feature 18) -->
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input type="checkbox" class="toggle toggle-primary" bind:checked={downloadLyrics} />
+            <div class="flex flex-col">
+              <span class="label-text text-[var(--text-color)] font-bold">Download Lyrics</span>
+              <span class="label-text-alt text-[var(--text-muted)]">Fetch and embed lyrics if available</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Video Codec (Feature 20) -->
+        <div class="form-control w-full max-w-md mt-2">
+          <label class="label">
+            <span class="label-text text-[var(--text-color)] font-bold">Video Codec Preference</span>
+          </label>
+          <select bind:value={videoCodec} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
+            <option value="default">Default (Best Compatibility)</option>
+            <option value="h264">H.264 (Most Compatible)</option>
+            <option value="hevc">HEVC/H.265 (High Compression)</option>
+          </select>
+          <label class="label">
+            <span class="label-text-alt text-[var(--text-muted)]">Prefer specific video codec when available.</span>
+          </label>
+        </div>
+
+        <!-- Metadata (Feature 11) -->
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input type="checkbox" class="toggle toggle-primary" bind:checked={embedMetadata} />
+            <div class="flex flex-col">
+              <span class="label-text text-[var(--text-color)] font-bold">Embed Metadata</span>
+              <span class="label-text-alt text-[var(--text-muted)]">Add ID3 tags (Artist, Title, etc.) to files</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Thumbnail (Feature 15) -->
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input type="checkbox" class="toggle toggle-primary" bind:checked={embedThumbnail} />
+            <div class="flex flex-col">
+              <span class="label-text text-[var(--text-color)] font-bold">Embed Thumbnail</span>
+              <span class="label-text-alt text-[var(--text-muted)]">Set video thumbnail as file icon/cover art</span>
             </div>
           </label>
         </div>

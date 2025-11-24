@@ -1,26 +1,30 @@
 import { json } from '@sveltejs/kit';
+import { downloadsManager } from '$lib/server/downloads';
 import fs from 'fs';
-import path from 'path';
-import { DOWNLOAD_DIR } from '$lib/server/config';
 
 export async function GET() {
   try {
-    if (!fs.existsSync(DOWNLOAD_DIR)) {
-      return json({ files: [] });
-    }
+    const files = downloadsManager.list()
+      .filter(d => d.status === 'completed' && d.filePath && fs.existsSync(d.filePath))
+      .map(d => {
+        let size = d.size || 0;
+        let mtime = new Date(d.updatedAt);
+        
+        try {
+          if (d.filePath) {
+            const stats = fs.statSync(d.filePath);
+            size = stats.size;
+            mtime = stats.mtime;
+          }
+        } catch {}
 
-    const files = fs.readdirSync(DOWNLOAD_DIR)
-      .filter(file => !file.startsWith('.') && !file.endsWith('.json') && !file.endsWith('.part') && fs.statSync(path.join(DOWNLOAD_DIR, file)).isFile())
-      .map(file => {
-        const stats = fs.statSync(path.join(DOWNLOAD_DIR, file));
         return {
-          name: file,
-          size: stats.size,
-          mtime: stats.mtime,
-          url: `/files/${encodeURIComponent(file)}`
+          name: d.title || d.filename || 'Unknown',
+          size: size,
+          mtime: mtime,
+          url: `/files/${d.relPath}`
         };
-      })
-      .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+      });
 
     return json({ files });
   } catch (error) {

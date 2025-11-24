@@ -10,6 +10,13 @@ function sanitizeName(name: string) {
 
 export async function GET({ url }) {
 	const videoUrl = url.searchParams.get('url');
+	const check = url.searchParams.get('check');
+	
+	if (check === 'true' && videoUrl) {
+		const existing = downloadsManager.checkExists(videoUrl);
+		return json({ exists: !!existing, id: existing?.id });
+	}
+
 	const quality = url.searchParams.get('quality') || DEFAULT_QUALITY;
 	console.log('[GET /api/download] url=%s quality=%s', videoUrl, quality);
 	if (!videoUrl) return json({ error: 'URL is required' }, { status: 400 });
@@ -54,6 +61,10 @@ export async function POST({ request }) {
 	const rateLimit = body.rateLimit || undefined;
 	const organizeByUploader = body.organizeByUploader === 'true' || body.organizeByUploader === true;
 	const splitChapters = body.splitChapters === 'true' || body.splitChapters === true;
+	const downloadLyrics = body.downloadLyrics === 'true' || body.downloadLyrics === true;
+	const videoCodec = body.videoCodec || 'default';
+	const embedMetadata = body.embedMetadata !== false; // Default true
+	const embedThumbnail = body.embedThumbnail !== false; // Default true
 
 	console.log('[POST /api/download] url=%s quality=%s format=%s', videoUrl, quality, format);
 	if (!videoUrl) return json({ error: 'URL is required' }, { status: 400 });
@@ -65,7 +76,8 @@ export async function POST({ request }) {
 		const records = await downloadsManager.enqueue({ 
 			url: videoUrl, format, quality, filenamePattern, startTime, endTime, normalize,
 			cookieContent, proxyUrl, useSponsorBlock, downloadSubtitles, rateLimit,
-			organizeByUploader, splitChapters
+			organizeByUploader, splitChapters, downloadLyrics, videoCodec,
+			embedMetadata, embedThumbnail
 		});
 		console.log('[POST /api/download] enqueued %d items', records.length);
 		return json({ id: records[0].id, count: records.length });

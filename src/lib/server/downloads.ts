@@ -45,6 +45,10 @@ export type DownloadRecord = {
   organizeByUploader?: boolean;
   splitChapters?: boolean;
   isFavorite?: boolean;
+  downloadLyrics?: boolean;
+  videoCodec?: 'default' | 'h264' | 'hevc';
+  embedMetadata?: boolean;
+  embedThumbnail?: boolean;
 };
 
 export type DownloadEvent =
@@ -189,7 +193,16 @@ class DownloadsManager extends EventEmitter {
     });
   }
 
-  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean }): Promise<DownloadRecord[]> {
+  checkExists(url: string): DownloadRecord | undefined {
+    for (const rec of this.items.values()) {
+      if (rec.status === 'completed' && rec.url === url) {
+        return rec;
+      }
+    }
+    return undefined;
+  }
+
+  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean; downloadLyrics?: boolean; videoCodec?: 'default' | 'h264' | 'hevc'; embedMetadata?: boolean; embedThumbnail?: boolean }): Promise<DownloadRecord[]> {
     // Check if playlist (only if not explicitly targeting a single video ID which usually doesn't have list= param, but let's just check)
     // Optimization: only check if URL contains 'list='
     if (input.url.includes('list=')) {
@@ -226,6 +239,10 @@ class DownloadsManager extends EventEmitter {
       rateLimit: input.rateLimit,
       organizeByUploader: input.organizeByUploader,
       splitChapters: input.splitChapters,
+      downloadLyrics: input.downloadLyrics,
+      videoCodec: input.videoCodec,
+      embedMetadata: input.embedMetadata,
+      embedThumbnail: input.embedThumbnail,
       progress: 0,
       status: 'queued',
       createdAt: now,
@@ -378,10 +395,14 @@ class DownloadsManager extends EventEmitter {
         args.push('-o', absPath);
         
         // Feature #11: Metadata Tagging
-        args.push('--add-metadata');
+        if (rec.embedMetadata !== false) { // Default to true if undefined
+          args.push('--add-metadata');
+        }
         
         // Feature 15: Thumbnail Embedding
-        args.push('--embed-thumbnail');
+        if (rec.embedThumbnail !== false) { // Default to true if undefined
+          args.push('--embed-thumbnail');
+        }
 
         // Feature 12: Video Trimming
         if (rec.startTime || rec.endTime) {
@@ -414,6 +435,20 @@ class DownloadsManager extends EventEmitter {
         // Feature 3: Subtitles
         if (rec.downloadSubtitles) {
           args.push('--write-subs', '--write-auto-subs', '--sub-lang', 'en,.*', '--embed-subs');
+        }
+
+        // Feature 18: Lyrics
+        if (rec.downloadLyrics) {
+          args.push('--write-lyrics');
+        }
+
+        // Feature 20: Video Codec Preference
+        if (rec.videoCodec && rec.videoCodec !== 'default') {
+          if (rec.videoCodec === 'h264') {
+            args.push('-S', 'vcodec:h264');
+          } else if (rec.videoCodec === 'hevc') {
+            args.push('-S', 'vcodec:h265');
+          }
         }
 
         // Feature 47: Rate Limit
@@ -533,7 +568,26 @@ class DownloadsManager extends EventEmitter {
   async retry(id: string): Promise<DownloadRecord | undefined> {
     const rec = this.items.get(id);
     if (!rec) return undefined;
-    const [newRec] = await this.enqueue({ url: rec.url, format: rec.format, quality: rec.quality });
+    const [newRec] = await this.enqueue({ 
+      url: rec.url, 
+      format: rec.format, 
+      quality: rec.quality,
+      filenamePattern: rec.filenamePattern,
+      startTime: rec.startTime,
+      endTime: rec.endTime,
+      normalize: rec.normalize,
+      cookieContent: rec.cookieContent,
+      proxyUrl: rec.proxyUrl,
+      useSponsorBlock: rec.useSponsorBlock,
+      downloadSubtitles: rec.downloadSubtitles,
+      rateLimit: rec.rateLimit,
+      organizeByUploader: rec.organizeByUploader,
+      splitChapters: rec.splitChapters,
+      downloadLyrics: rec.downloadLyrics,
+      videoCodec: rec.videoCodec,
+      embedMetadata: rec.embedMetadata,
+      embedThumbnail: rec.embedThumbnail
+    });
     return newRec;
   }
 

@@ -9,7 +9,7 @@ export async function GET() {
   return json(items);
 }
 
-export async function DELETE({ url }) {
+export async function DELETE({ url, request }) {
   const rel = url.searchParams.get('rel');
   const id = url.searchParams.get('id');
   const all = url.searchParams.get('all') === 'true';
@@ -25,8 +25,14 @@ export async function DELETE({ url }) {
     return new Response(null, { status: 204 });
   }
 
-  if (!rel) return new Response(null, { status: 400 });
-  // Legacy deletion by path
-  // ... (keep existing logic if needed, or just rely on ID)
-  return new Response(null, { status: 204 });
+  // Try to parse body for bulk delete
+  try {
+    const body = await request.json();
+    if (body.ids && Array.isArray(body.ids)) {
+      downloadsManager.delete(body.ids);
+      return new Response(null, { status: 204 });
+    }
+  } catch {}
+
+  return new Response(null, { status: 400 });
 }
