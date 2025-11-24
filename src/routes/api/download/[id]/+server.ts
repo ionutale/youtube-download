@@ -17,6 +17,9 @@ export async function PATCH({ params, request }) {
   } else if (action === 'retry') {
     const rec = await downloadsManager.retry(id);
     return json({ success: true, id: rec?.id });
+  } else if (action === 'favorite') {
+    downloadsManager.toggleFavorite(id);
+    return json({ success: true });
   }
 
   return json({ error: 'Invalid action' }, { status: 400 });

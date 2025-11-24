@@ -8,6 +8,8 @@
   let useSponsorBlock = $settings.useSponsorBlock || false;
   let downloadSubtitles = $settings.downloadSubtitles || false;
   let rateLimit = $settings.rateLimit || '';
+  let organizeByUploader = $settings.organizeByUploader || false;
+  let splitChapters = $settings.splitChapters || false;
 
   function save() {
     settings.update(s => ({ 
@@ -17,7 +19,9 @@
       cookieContent,
       useSponsorBlock,
       downloadSubtitles,
-      rateLimit
+      rateLimit,
+      organizeByUploader,
+      splitChapters
     }));
   }
 
@@ -28,7 +32,9 @@
         cookieContent !== $settings.cookieContent ||
         useSponsorBlock !== $settings.useSponsorBlock ||
         downloadSubtitles !== $settings.downloadSubtitles ||
-        rateLimit !== $settings.rateLimit) {
+        rateLimit !== $settings.rateLimit ||
+        organizeByUploader !== $settings.organizeByUploader ||
+        splitChapters !== $settings.splitChapters) {
       save();
     }
   }
@@ -158,6 +164,28 @@
             <div class="flex flex-col">
               <span class="label-text text-[var(--text-color)] font-bold">Download Subtitles</span>
               <span class="label-text-alt text-[var(--text-muted)]">Embed subtitles if available (auto-generated included)</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Organization (Feature 33) -->
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input type="checkbox" class="toggle toggle-primary" bind:checked={organizeByUploader} />
+            <div class="flex flex-col">
+              <span class="label-text text-[var(--text-color)] font-bold">Organize by Uploader</span>
+              <span class="label-text-alt text-[var(--text-muted)]">Save files into subfolders named after the channel</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Chapter Splitting (Feature 14) -->
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input type="checkbox" class="toggle toggle-primary" bind:checked={splitChapters} />
+            <div class="flex flex-col">
+              <span class="label-text text-[var(--text-color)] font-bold">Split Chapters</span>
+              <span class="label-text-alt text-[var(--text-muted)]">Create separate files for each video chapter</span>
             </div>
           </label>
         </div>

@@ -28,6 +28,15 @@ export async function GET({ url }) {
 	}
 }
 
+export async function DELETE({ request }) {
+	const body = await request.json().catch(() => ({}));
+	const ids = body.ids;
+	if (!Array.isArray(ids)) return json({ error: 'ids array required' }, { status: 400 });
+	
+	downloadsManager.delete(ids);
+	return json({ success: true });
+}
+
 export async function POST({ url }) {
 	const videoUrl = url.searchParams.get('url');
 	const quality = url.searchParams.get('quality') || DEFAULT_QUALITY;
@@ -36,6 +45,13 @@ export async function POST({ url }) {
 	const startTime = url.searchParams.get('startTime') || undefined;
 	const endTime = url.searchParams.get('endTime') || undefined;
 	const normalize = url.searchParams.get('normalize') === 'true';
+	const cookieContent = url.searchParams.get('cookieContent') || undefined;
+	const proxyUrl = url.searchParams.get('proxyUrl') || undefined;
+	const useSponsorBlock = url.searchParams.get('useSponsorBlock') === 'true';
+	const downloadSubtitles = url.searchParams.get('downloadSubtitles') === 'true';
+	const rateLimit = url.searchParams.get('rateLimit') || undefined;
+	const organizeByUploader = url.searchParams.get('organizeByUploader') === 'true';
+	const splitChapters = url.searchParams.get('splitChapters') === 'true';
 
 	console.log('[POST /api/download] url=%s quality=%s format=%s', videoUrl, quality, format);
 	if (!videoUrl) return json({ error: 'URL is required' }, { status: 400 });
@@ -44,7 +60,11 @@ export async function POST({ url }) {
 	}
 
 	try {
-		const records = await downloadsManager.enqueue({ url: videoUrl, format, quality, filenamePattern, startTime, endTime, normalize });
+		const records = await downloadsManager.enqueue({ 
+			url: videoUrl, format, quality, filenamePattern, startTime, endTime, normalize,
+			cookieContent, proxyUrl, useSponsorBlock, downloadSubtitles, rateLimit,
+			organizeByUploader, splitChapters
+		});
 		console.log('[POST /api/download] enqueued %d items', records.length);
 		return json({ id: records[0].id, count: records.length });
 	} catch (error: any) {

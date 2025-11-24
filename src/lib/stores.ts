@@ -13,7 +13,9 @@ const defaultSettings = {
   proxyUrl: '',
   useSponsorBlock: false,
   downloadSubtitles: false,
-  rateLimit: ''
+  rateLimit: '',
+  organizeByUploader: false,
+  splitChapters: false
 };
 
 const stored = browser ? JSON.parse(localStorage.getItem('settings') || '{}') : {};

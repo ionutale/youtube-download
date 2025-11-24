@@ -29,6 +29,70 @@
   let logs: Record<string, string[]> = {};
   let activeLogId: string | null = null;
 
+  // Feature 35: Bulk Actions
+  let selectedIds = new Set<string>();
+  $: allSelected = filteredDownloads.length > 0 && selectedIds.size === filteredDownloads.length;
+
+  function toggleSelection(id: string) {
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+    } else {
+      selectedIds.add(id);
+    }
+    selectedIds = new Set(selectedIds); // trigger reactivity
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      selectedIds = new Set();
+    } else {
+      selectedIds = new Set(filteredDownloads.map(d => d.id));
+    }
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} items?`)) return;
+
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await fetch('/api/download', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      
+      if (res.ok) {
+        toast.success('Deleted selected items');
+        selectedIds = new Set();
+      } else {
+        toast.error('Failed to delete items');
+      }
+    } catch (e) {
+      toast.error('Error deleting items');
+    }
+  }
+
+  // Feature 40: Favorites
+  async function toggleFavorite(id: string, currentStatus: boolean) {
+    try {
+      // Optimistic update
+      const idx = downloads.findIndex(d => d.id === id);
+      if (idx >= 0) {
+        downloads[idx].isFavorite = !currentStatus;
+        downloads = [...downloads];
+      }
+
+      await fetch(`/api/download/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'favorite' }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (e) {
+      toast.error('Failed to update favorite');
+    }
+  }
+
   function openPreview(item: any) {
     previewItem = item;
     const modal = document.getElementById('preview_modal') as HTMLDialogElement;
@@ -386,10 +450,28 @@
   <!-- Active Downloads (Feature 4) -->
   <div class="mt-12">
     <div class="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-      <h2 class="text-2xl font-bold flex items-center gap-2 text-[var(--text-color)]">
-        <span class="w-2 h-8 rounded-full bg-neon-pink"></span>
-        Active Downloads
-      </h2>
+      <div class="flex items-center gap-4">
+        <h2 class="text-2xl font-bold flex items-center gap-2 text-[var(--text-color)]">
+          <span class="w-2 h-8 rounded-full bg-neon-pink"></span>
+          Active Downloads
+        </h2>
+        
+        <!-- Bulk Actions Toolbar -->
+        {#if downloads.length > 0}
+          <div class="flex items-center gap-2 ml-4 border-l border-[var(--glass-border)] pl-4">
+            <label class="label cursor-pointer gap-2">
+              <input type="checkbox" class="checkbox checkbox-sm checkbox-primary" checked={allSelected} on:change={toggleSelectAll} />
+              <span class="label-text text-xs text-[var(--text-muted)]">All</span>
+            </label>
+            
+            {#if selectedIds.size > 0}
+              <button class="btn btn-xs btn-error text-white" on:click={deleteSelected}>
+                Delete ({selectedIds.size})
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </div>
       
       <div class="flex items-center gap-4 flex-1 justify-end">
         <!-- Search Bar (Feature 31) -->
@@ -431,7 +513,28 @@
     {:else}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         {#each filteredDownloads as download (download.id)}
-          <div class="glass-panel rounded-2xl p-4 flex gap-4 transition-all hover:bg-[var(--glass-highlight)] relative overflow-hidden group">
+          <div class="glass-panel rounded-2xl p-4 flex gap-4 transition-all hover:bg-[var(--glass-highlight)] relative overflow-hidden group {selectedIds.has(download.id) ? 'ring-2 ring-neon-blue bg-[var(--glass-highlight)]' : ''}">
+            <!-- Selection Checkbox -->
+            <div class="absolute top-2 left-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity {selectedIds.has(download.id) ? 'opacity-100' : ''}">
+              <input 
+                type="checkbox" 
+                class="checkbox checkbox-sm checkbox-primary bg-black/50 border-white/20" 
+                checked={selectedIds.has(download.id)} 
+                on:change={() => toggleSelection(download.id)} 
+              />
+            </div>
+
+            <!-- Favorite Star -->
+            <button 
+              class="absolute top-2 right-2 z-20 btn btn-circle btn-xs btn-ghost {download.isFavorite ? 'text-yellow-400 opacity-100' : 'text-gray-500 opacity-0 group-hover:opacity-100'}"
+              on:click={() => toggleFavorite(download.id, download.isFavorite)}
+              title="Toggle Favorite"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+              </svg>
+            </button>
+
             <!-- Progress Background -->
             <div class="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-neon-pink to-neon-blue transition-all duration-500" style="width: {download.progress}%"></div>
             

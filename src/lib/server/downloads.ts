@@ -41,6 +41,9 @@ export type DownloadRecord = {
   useSponsorBlock?: boolean;
   downloadSubtitles?: boolean;
   rateLimit?: string;
+  organizeByUploader?: boolean;
+  splitChapters?: boolean;
+  isFavorite?: boolean;
 };
 
 export type DownloadEvent =
@@ -183,7 +186,7 @@ class DownloadsManager extends EventEmitter {
     });
   }
 
-  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string }): Promise<DownloadRecord[]> {
+  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean }): Promise<DownloadRecord[]> {
     // Check if playlist (only if not explicitly targeting a single video ID which usually doesn't have list= param, but let's just check)
     // Optimization: only check if URL contains 'list='
     if (input.url.includes('list=')) {
@@ -218,6 +221,8 @@ class DownloadsManager extends EventEmitter {
       useSponsorBlock: input.useSponsorBlock,
       downloadSubtitles: input.downloadSubtitles,
       rateLimit: input.rateLimit,
+      organizeByUploader: input.organizeByUploader,
+      splitChapters: input.splitChapters,
       progress: 0,
       status: 'queued',
       createdAt: now,
@@ -322,8 +327,17 @@ class DownloadsManager extends EventEmitter {
       const safeTitle = baseName.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 120);
       const ext = rec.format === 'mp3' ? 'mp3' : rec.format;
       const filename = `${safeTitle}.${ext}`;
-      const absPath = path.join(DOWNLOAD_DIR, filename);
-      const relPath = filename;
+      
+      // Feature 33: Folder Organization
+      let targetDir = DOWNLOAD_DIR;
+      if (rec.organizeByUploader && meta.uploader) {
+        const safeUploader = meta.uploader.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 50);
+        targetDir = path.join(DOWNLOAD_DIR, safeUploader);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      const absPath = path.join(targetDir, filename);
+      const relPath = path.relative(DOWNLOAD_DIR, absPath);
 
       // Cache thumbnail
       const thumbLocal = await this.cacheThumbnail(meta.title, meta.thumbnail);
@@ -402,6 +416,34 @@ class DownloadsManager extends EventEmitter {
         // Feature 47: Rate Limit
         if (rec.rateLimit) {
           args.push('--limit-rate', rec.rateLimit);
+        }
+
+        // Feature 14: Chapter Splitting
+        if (rec.splitChapters) {
+          args.push('--split-chapters');
+          // When splitting chapters, yt-dlp creates multiple files.
+          // The output template needs to handle this, usually by appending chapter info.
+          // We might need to adjust -o to include chapter index/title.
+          // For now, let's just append chapter info to the filename template if not present.
+          // Actually, if we use -o with a fixed filename, yt-dlp might overwrite or fail.
+          // Let's modify the output template for chapters.
+          // We need to remove the fixed filename and use a template that includes chapter info.
+          // But we already resolved `absPath`.
+          // If splitChapters is on, we should probably use a directory output or a template.
+          // Let's try to append ` - %(section_number)03d - %(section_title)s` to the output template.
+          // But `absPath` is fully resolved.
+          // We need to change `args` to use a template instead of `absPath` if splitting.
+          // Let's just append to the path before extension.
+          const dir = path.dirname(absPath);
+          const name = path.basename(absPath, path.extname(absPath));
+          const ext = path.extname(absPath);
+          // Override -o
+          const newOutput = path.join(dir, `${name} - %(section_number)03d - %(section_title)s${ext}`);
+          // Remove the previous -o
+          const oIndex = args.indexOf('-o');
+          if (oIndex >= 0) {
+            args[oIndex + 1] = newOutput;
+          }
         }
 
         args.push(rec.url);
@@ -517,6 +559,41 @@ class DownloadsManager extends EventEmitter {
     const idx = this.queue.indexOf(id);
     if (idx >= 0) this.queue.splice(idx, 1);
     this.update(id, { status: 'canceled' });
+  }
+
+  toggleFavorite(id: string) {
+    const rec = this.items.get(id);
+    if (rec) {
+      this.update(id, { isFavorite: !rec.isFavorite });
+    }
+  }
+
+  delete(ids: string[]) {
+    for (const id of ids) {
+      const rec = this.items.get(id);
+      if (!rec) continue;
+      
+      // Stop if running
+      this.cancel(id);
+
+      // Delete files
+      if (rec.filePath && fs.existsSync(rec.filePath)) {
+        try { fs.unlinkSync(rec.filePath); } catch {}
+      }
+      if (rec.relPath) {
+        const metaPath = path.join(DOWNLOAD_DIR, rec.relPath.replace(/\.[^/.]+$/, '') + '.json');
+        if (fs.existsSync(metaPath)) try { fs.unlinkSync(metaPath); } catch {}
+      }
+      // Delete thumbnail if local
+      if (rec.thumbnail && rec.thumbnail.startsWith('/files/')) {
+         const localThumb = path.join(DOWNLOAD_DIR, 'thumbnails', path.basename(rec.thumbnail));
+         if (fs.existsSync(localThumb)) try { fs.unlinkSync(localThumb); } catch {}
+      }
+
+      this.items.delete(id);
+      if (rec.relPath) dbDeleteByRel(rec.relPath);
+      this.emit('event', { type: 'remove', id } satisfies DownloadEvent);
+    }
   }
 }
 
