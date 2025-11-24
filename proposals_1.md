@@ -61,3 +61,5 @@ Here are 50 feature proposals to enhance the YouTube Downloader application, cat
 48. **Queue Priority**: Ability to reorder the download queue (drag and drop).
 49. **Scheduled Downloads**: Set a time window (e.g., 2 AM - 6 AM) for active downloads.
 50. **Docker Healthcheck**: Add a healthcheck endpoint and configuration for better container orchestration.
+51. **Multi-Platform Support**: Add support for downloading music from other platforms like Spotify, SoundCloud, Bandcamp, etc.
+52. **Database Integration**: Add database integration for storing download history and metadata.

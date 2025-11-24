@@ -2,55 +2,14 @@ import { EventEmitter } from 'events';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
-import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR, MAX_CONCURRENCY } from './config';
-import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload } from './db';
-import ffmpegPath from 'ffmpeg-static';
-import { spawn, spawnSync } from 'child_process';
-import ytdl from './ytdl';
+import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR, MAX_CONCURRENCY, RETENTION_DAYS } from './config';
+import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload, dbDeleteByRel } from './db';
+import { spawn } from 'child_process';
+import { pipeline } from 'stream/promises';
+import { Readable } from 'stream';
 
-// Resolve ffmpeg path: prefer ffmpeg-static, else system ffmpeg from PATH
-let RESOLVED_FFMPEG: string | null = null;
-let HAS_YTDLP = false;
-const RESOLVED_UA = process.env.YT_UA || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
-const RESOLVED_COOKIE = process.env.YT_COOKIE || '';
-try {
-  const staticPath = (ffmpegPath || null) as string | null;
-  if (staticPath && fs.existsSync(staticPath)) {
-    RESOLVED_FFMPEG = staticPath;
-  } else {
-    const res = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
-    if (res.status === 0) RESOLVED_FFMPEG = 'ffmpeg';
-  }
-  const ytdlp = spawnSync('yt-dlp', ['--version'], { stdio: 'ignore' });
-  HAS_YTDLP = ytdlp.status === 0;
-} catch {}
-
-function buildHeaders() {
-  const h: Record<string, string> = {
-    'user-agent': RESOLVED_UA,
-    'accept-language': 'en-US,en;q=0.9'
-  };
-  if (RESOLVED_COOKIE) h['cookie'] = RESOLVED_COOKIE;
-  return h;
-}
-
-async function downloadWithYtDlp(url: string, outPath: string) {
-  return await new Promise<void>((resolve, reject) => {
-    console.warn('[downloads] falling back to yt-dlp for url=%s', url);
-    const proc = spawn('yt-dlp', ['-f', 'bv*+ba/b', '--merge-output-format', 'mp4', '-o', outPath, url], { stdio: 'inherit' });
-    proc.on('error', reject);
-    proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('yt-dlp exit ' + code))));
-  });
-}
-
-async function downloadWithYtDlpAudioMp3(url: string, outPathMp3: string) {
-  return await new Promise<void>((resolve, reject) => {
-    console.warn('[downloads] yt-dlp audio extract to mp3 for url=%s', url);
-    const proc = spawn('yt-dlp', ['-x', '--audio-format', 'mp3', '-o', outPathMp3, url], { stdio: 'inherit' });
-    proc.on('error', reject);
-    proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error('yt-dlp exit ' + code))));
-  });
-}
+// We rely on yt-dlp being available in the system (installed via Dockerfile)
+const YTDLP_BIN = 'yt-dlp';
 
 export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
 
@@ -62,7 +21,7 @@ export type DownloadRecord = {
   filePath?: string; // absolute path
   relPath?: string; // relative path under DOWNLOAD_DIR
   thumbnail?: string; // may be local /files/thumbnails/<name>
-  format: 'mp3' | 'mp4';
+  format: 'mp3' | 'mp4' | 'webm' | 'mkv';
   quality?: string;
   progress: number; // 0-100
   status: DownloadStatus;
@@ -73,17 +32,25 @@ export type DownloadRecord = {
   speedBps?: number;
   etaSeconds?: number;
   error?: string;
+  filenamePattern?: string;
+  startTime?: string;
+  endTime?: string;
+  normalize?: boolean;
+  cookieContent?: string;
+  proxyUrl?: string;
+  useSponsorBlock?: boolean;
+  downloadSubtitles?: boolean;
+  rateLimit?: string;
 };
 
 export type DownloadEvent =
-  | { type: 'snapshot'; downloads: DownloadRecord[] }
+  | { type: 'snapshot'; downloads: DownloadRecord[]; stats?: { totalBytes: number; freeBytes: number } }
   | { type: 'update'; download: DownloadRecord }
-  | { type: 'remove'; id: string };
+  | { type: 'remove'; id: string }
+  | { type: 'log'; id: string; message: string };
 
 type Controller = {
-  stream?: NodeJS.ReadableStream & { pause: () => void; resume: () => void; destroy: () => void };
-  file?: fs.WriteStream;
-  tempPath?: string;
+  process?: any;
   paused?: boolean;
 };
 
@@ -96,12 +63,13 @@ class DownloadsManager extends EventEmitter {
 
   constructor() {
     super();
-  if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+    if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
     const th = path.join(DOWNLOAD_DIR, 'thumbnails');
     if (!fs.existsSync(th)) fs.mkdirSync(th, { recursive: true });
-  try { dbMigrateFromLegacy(); console.log('[downloads] migration complete'); } catch (e) { console.warn('[downloads] migration error', e); }
-  this.loadState();
-  console.log('[downloads] loaded %d items from persistence', this.items.size);
+
+    try { dbMigrateFromLegacy(); console.log('[downloads] migration complete'); } catch (e) { console.warn('[downloads] migration error', e); }
+    this.loadState();
+    console.log('[downloads] loaded %d items from persistence', this.items.size);
     // requeue items that were in progress
     for (const rec of this.items.values()) {
       if (rec.status === 'queued' || rec.status === 'downloading' || rec.status === 'paused') {
@@ -110,6 +78,56 @@ class DownloadsManager extends EventEmitter {
       }
     }
     this.maybeRunNext();
+    this.scheduleCleanup();
+  }
+
+  private scheduleCleanup() {
+    if (RETENTION_DAYS <= 0) return;
+    console.log('[downloads] scheduling cleanup every 1h, retention=%d days', RETENTION_DAYS);
+    setInterval(() => this.cleanup(), 60 * 60 * 1000);
+    this.cleanup(); // run once on startup
+  }
+
+  private cleanup() {
+    if (RETENTION_DAYS <= 0) return;
+    const cutoff = Date.now() - (RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    console.log('[downloads] running cleanup, cutoff=%s', new Date(cutoff).toISOString());
+    
+    const toDelete: string[] = [];
+    for (const [id, rec] of this.items.entries()) {
+      if (rec.status === 'completed' && rec.createdAt < cutoff) {
+        toDelete.push(id);
+      }
+    }
+
+    for (const id of toDelete) {
+      const rec = this.items.get(id);
+      if (!rec) continue;
+      console.log('[downloads] auto-cleanup deleting id=%s file=%s', id, rec.relPath);
+      
+      // Delete file
+      if (rec.filePath && fs.existsSync(rec.filePath)) {
+        try { fs.unlinkSync(rec.filePath); } catch (e) { console.warn('failed to delete file', e); }
+      }
+      // Delete metadata json
+      if (rec.relPath) {
+        const metaPath = path.join(DOWNLOAD_DIR, rec.relPath.replace(/\.[^/.]+$/, '') + '.json');
+        if (fs.existsSync(metaPath)) try { fs.unlinkSync(metaPath); } catch {}
+      }
+      // Delete thumbnail if local
+      if (rec.thumbnail && rec.thumbnail.startsWith('/files/')) {
+         const thumbPath = path.join(process.cwd(), rec.thumbnail.replace(/^\/files\//, 'download/')); // rough mapping
+         // actually thumbnail path logic is a bit custom in cacheThumbnail, let's just try best effort or ignore for now
+         // The thumbnail path in record is like /files/thumbnails/xyz.jpg
+         // The actual path is download/thumbnails/xyz.jpg
+         const localThumb = path.join(DOWNLOAD_DIR, 'thumbnails', path.basename(rec.thumbnail));
+         if (fs.existsSync(localThumb)) try { fs.unlinkSync(localThumb); } catch {}
+      }
+
+      this.items.delete(id);
+      if (rec.relPath) dbDeleteByRel(rec.relPath);
+      this.emit('event', { type: 'remove', id } satisfies DownloadEvent);
+    }
   }
 
   list(): DownloadRecord[] {
@@ -117,18 +135,89 @@ class DownloadsManager extends EventEmitter {
   }
 
   snapshot() {
-    this.emit('event', { type: 'snapshot', downloads: this.list() } satisfies DownloadEvent);
+    this.emit('event', { type: 'snapshot', downloads: this.list(), stats: this.getStats() } satisfies DownloadEvent);
   }
 
-  enqueue(input: { url: string; format?: 'mp3' | 'mp4'; quality?: string }): DownloadRecord {
+  getStats() {
+    let totalBytes = 0;
+    let freeBytes = 0;
+    try {
+      // Calculate total size of download dir
+      const files = fs.readdirSync(DOWNLOAD_DIR);
+      for (const file of files) {
+        try {
+          const stat = fs.statSync(path.join(DOWNLOAD_DIR, file));
+          if (stat.isFile()) totalBytes += stat.size;
+        } catch {}
+      }
+      // Check free space (requires 'df' or similar, but let's just return used for now or use fs.statfs if node 18+)
+      // Node 18.15+ has fs.statfsSync
+      if ((fs as any).statfsSync) {
+        const stats = (fs as any).statfsSync(DOWNLOAD_DIR);
+        freeBytes = stats.bavail * stats.bsize;
+      }
+    } catch {}
+    return { totalBytes, freeBytes };
+  }
+
+  public async getPlaylistItems(url: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      // --flat-playlist: do not download videos
+      // --dump-single-json: output one JSON with "entries" array
+      const args = ['--flat-playlist', '--dump-single-json', url];
+      const proc = spawn(YTDLP_BIN, args);
+      let stdout = '';
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.on('close', (code) => {
+        if (code !== 0) return resolve([]); // Not a playlist or error, treat as single
+        try {
+          const data = JSON.parse(stdout);
+          if (data._type === 'playlist' && Array.isArray(data.entries)) {
+             return resolve(data.entries.map((e: any) => e.url || e.original_url || `https://www.youtube.com/watch?v=${e.id}`));
+          }
+          resolve([]);
+        } catch {
+          resolve([]);
+        }
+      });
+    });
+  }
+
+  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string }): Promise<DownloadRecord[]> {
+    // Check if playlist (only if not explicitly targeting a single video ID which usually doesn't have list= param, but let's just check)
+    // Optimization: only check if URL contains 'list='
+    if (input.url.includes('list=')) {
+       const items = await this.getPlaylistItems(input.url);
+       if (items.length > 0) {
+         console.log('[downloads] expanding playlist with %d items', items.length);
+         const records: DownloadRecord[] = [];
+         for (const itemUrl of items) {
+           // Recursively enqueue (but itemUrl won't have list= usually, or we strip it)
+           // We must ensure we don't loop. getPlaylistItems returns video URLs.
+           const [single] = await this.enqueue({ ...input, url: itemUrl });
+           records.push(single);
+         }
+         return records;
+       }
+    }
+
     const id = crypto.randomUUID();
     const now = Date.now();
     console.log('[downloads] enqueue id=%s url=%s format=%s quality=%s', id, input.url, input.format || DEFAULT_FORMAT, input.quality || DEFAULT_QUALITY);
     const rec: DownloadRecord = {
       id,
       url: input.url,
-      format: input.format || DEFAULT_FORMAT,
+      format: (input.format as any) || DEFAULT_FORMAT,
       quality: input.quality || DEFAULT_QUALITY,
+      filenamePattern: input.filenamePattern,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      normalize: input.normalize,
+      cookieContent: input.cookieContent,
+      proxyUrl: input.proxyUrl,
+      useSponsorBlock: input.useSponsorBlock,
+      downloadSubtitles: input.downloadSubtitles,
+      rateLimit: input.rateLimit,
       progress: 0,
       status: 'queued',
       createdAt: now,
@@ -138,7 +227,7 @@ class DownloadsManager extends EventEmitter {
     this.queue.push(id);
     this.emit('event', { type: 'update', download: rec } satisfies DownloadEvent);
     this.maybeRunNext();
-    return rec;
+    return [rec];
   }
 
   update(id: string, patch: Partial<DownloadRecord>): DownloadRecord | undefined {
@@ -151,19 +240,42 @@ class DownloadsManager extends EventEmitter {
     return updated;
   }
 
+  public async getMetadata(url: string): Promise<{ title: string; thumbnail?: string; duration?: number; description?: string; uploader?: string; id?: string }> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(YTDLP_BIN, ['--dump-json', url]);
+      let stdout = '';
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.on('close', (code) => {
+        if (code !== 0) return reject(new Error(`yt-dlp dump-json exited with ${code}`));
+        try {
+          const data = JSON.parse(stdout);
+          resolve({
+            title: data.title || 'download',
+            thumbnail: data.thumbnail,
+            duration: data.duration,
+            description: data.description,
+            uploader: data.uploader,
+            id: data.id
+          });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+  }
+
   private async cacheThumbnail(title: string, url?: string): Promise<string | undefined> {
     if (!url) return undefined;
     try {
       const safe = title.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 120);
       const file = path.join(DOWNLOAD_DIR, 'thumbnails', safe + '.jpg');
+      if (fs.existsSync(file)) return `/${path.join('files', 'thumbnails', safe + '.jpg')}`;
+
       const res = await fetch(url);
       if (!res.ok || !res.body) return undefined;
       const stream = fs.createWriteStream(file);
-      await new Promise<void>((resolve, reject) => {
-        (res.body as any).pipe(stream);
-        stream.on('finish', () => resolve());
-        stream.on('error', reject);
-      });
+      // @ts-ignore
+      await pipeline(Readable.fromWeb(res.body as any), stream);
       return `/${path.join('files', 'thumbnails', safe + '.jpg')}`;
     } catch {
       return undefined;
@@ -174,230 +286,173 @@ class DownloadsManager extends EventEmitter {
     const rec = this.items.get(id);
     if (!rec) return;
     this.running++;
+    let cookiePath: string | undefined;
+
     try {
       console.log('[downloads] run start id=%s', id);
-      this.update(id, { status: 'downloading' });
-        const headers = buildHeaders();
-        let info: any;
-        try {
-          info = await (ytdl.getInfo ? ytdl.getInfo(rec.url, { requestOptions: { headers } }) : (ytdl as any).getInfo(rec.url, { requestOptions: { headers } }));
-        } catch (e) {
-          console.warn('[downloads] getInfo failed; considering yt-dlp fallback id=%s', id);
-          const titleSafe = 'download';
-          const ext = rec.format === 'mp3' ? 'mp3' : 'mp4';
-          const relPath = titleSafe + `.${ext}`;
-          const absPath = path.join(DOWNLOAD_DIR, relPath);
-          const tempPath = absPath + '.part';
-          if (rec.format === 'mp3' && HAS_YTDLP) {
-            await downloadWithYtDlpAudioMp3(rec.url, absPath);
-            const meta = { title: titleSafe, thumbnail: undefined, path: `/${path.join('files', relPath)}` };
-            fs.writeFileSync(path.join(DOWNLOAD_DIR, titleSafe + '.json'), JSON.stringify(meta));
-            this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
-            return;
-          }
-          if (rec.format === 'mp4' && HAS_YTDLP) {
-            await downloadWithYtDlp(rec.url, tempPath);
-            fs.renameSync(tempPath, absPath);
-            const meta = { title: titleSafe, thumbnail: undefined, path: `/${path.join('files', relPath)}` };
-            fs.writeFileSync(path.join(DOWNLOAD_DIR, titleSafe + '.json'), JSON.stringify(meta));
-            this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
-            return;
-          }
-          throw e;
-        }
-  const title = info.videoDetails?.title as string || 'download';
-  const thumbnails = (info.videoDetails?.thumbnails as Array<{ url: string }>) || [];
-      const safe = title.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 120);
-  const ext = rec.format === 'mp3' ? 'mp3' : 'mp4';
-      const relPath = safe + `.${ext}`;
-      const absPath = path.join(DOWNLOAD_DIR, relPath);
-      const tempPath = absPath + '.part';
-      const thumbLocal = await this.cacheThumbnail(title, thumbnails?.[0]?.url);
-      this.update(id, { title, filename: path.basename(absPath), filePath: absPath, relPath, thumbnail: thumbLocal || thumbnails?.[0]?.url });
+      this.update(id, { status: 'downloading', progress: 0, error: undefined });
 
-      if (!info.formats || info.formats.length === 0) {
-        console.warn('[downloads] no formats in info; considering yt-dlp fallback id=%s', id);
-        const ext = rec.format === 'mp3' ? 'mp3' : 'mp4';
-        const relPath = safe + `.${ext}`;
-        const absPath = path.join(DOWNLOAD_DIR, relPath);
-        const tempPath = absPath + '.part';
-        if (rec.format === 'mp3' && HAS_YTDLP) {
-          await downloadWithYtDlpAudioMp3(rec.url, absPath);
-          const metadata = { title: safe, thumbnail: thumbnails?.[0]?.url, path: `/${path.join('files', relPath)}` };
-          fs.writeFileSync(path.join(DOWNLOAD_DIR, safe + '.json'), JSON.stringify(metadata));
-          this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
-          return;
-        }
-        if (rec.format === 'mp4' && HAS_YTDLP) {
-          await downloadWithYtDlp(rec.url, tempPath);
-          fs.renameSync(tempPath, absPath);
-          const metadata = { title: safe, thumbnail: thumbnails?.[0]?.url, path: `/${path.join('files', relPath)}` };
-          fs.writeFileSync(path.join(DOWNLOAD_DIR, safe + '.json'), JSON.stringify(metadata));
-          this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
-          return;
-        }
+      // Feature 8: Cookie Support
+      if (rec.cookieContent) {
+        cookiePath = path.join(DOWNLOAD_DIR, `cookies-${id}.txt`);
+        fs.writeFileSync(cookiePath, rec.cookieContent);
       }
-      const chosen = (ytdl.chooseFormat ? ytdl.chooseFormat(info.formats, { quality: rec.quality }) : (ytdl as any).chooseFormat(info.formats, { quality: rec.quality }));
-  console.log('[downloads] chosen format id=%s itag=%s hasVideo=%s hasAudio=%s isHLS=%s isDash=%s', id, (chosen as any)?.itag, (chosen as any)?.hasVideo, (chosen as any)?.hasAudio, (chosen as any)?.isHLS, (chosen as any)?.isDashMPD);
-      const hasVideo = !!chosen.hasVideo;
-      const hasAudio = !!chosen.hasAudio;
-      const progressive = hasVideo && hasAudio && chosen.isHLS === false && chosen.isDashMPD === false;
-      let effective = chosen as any;
-      // If we need mux but ffmpeg is missing, try to find a progressive MP4 fallback
-  const ff = RESOLVED_FFMPEG;
-  const ffmpegExists = !!ff;
-      if (rec.format === 'mp4' && !progressive && !ffmpegExists) {
-        const formats = (ytdl.filterFormats ? ytdl.filterFormats(info.formats, 'audioandvideo') : info.formats.filter((f: any) => f.hasVideo && f.hasAudio && !f.isHLS && !f.isDashMPD)) as any[];
-        // Prefer mp4 container
-        const mp4s = formats.filter((f: any) => (f.container || f.mimeType || '').toString().includes('mp4'));
-        // Choose highest quality among progressive mp4s (fallback)
-        const fallback = mp4s[0] || formats[0];
-        if (fallback) {
-          effective = fallback;
-          console.warn('[downloads] using progressive MP4 fallback itag=%s', (fallback as any)?.itag);
+
+      // 1. Get Metadata
+      let meta;
+      try {
+        // Pass cookies to metadata fetch if available
+        // Note: getMetadata spawns a new process, we might need to update it to accept args or just rely on basic metadata
+        // For now, let's assume basic metadata works without cookies or we accept failure.
+        // Ideally we should pass cookies to getMetadata too.
+        meta = await this.getMetadata(rec.url);
+      } catch (e) {
+        console.warn('[downloads] metadata failed, using defaults', e);
+        meta = { title: 'download-' + id.slice(0, 8) };
+      }
+
+      // Feature 17: File Renaming Patterns
+      let baseName = rec.filenamePattern || '{title}';
+      baseName = baseName
+        .replace('{title}', meta.title)
+        .replace('{id}', meta.id || id)
+        .replace('{uploader}', meta.uploader || 'unknown')
+        .replace('{date}', new Date().toISOString().split('T')[0]);
+
+      const safeTitle = baseName.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 120);
+      const ext = rec.format === 'mp3' ? 'mp3' : rec.format;
+      const filename = `${safeTitle}.${ext}`;
+      const absPath = path.join(DOWNLOAD_DIR, filename);
+      const relPath = filename;
+
+      // Cache thumbnail
+      const thumbLocal = await this.cacheThumbnail(meta.title, meta.thumbnail);
+      this.update(id, {
+        title: meta.title,
+        thumbnail: thumbLocal || meta.thumbnail,
+        filename,
+        filePath: absPath,
+        relPath
+      });
+
+      // 2. Download
+      await new Promise<void>((resolve, reject) => {
+        const args = ['--newline', '--no-colors']; // simplified output
+
+        if (rec.format === 'mp3') {
+          args.push('-x', '--audio-format', 'mp3');
+          // Audio quality control (Feature #5)
+          if (rec.quality && rec.quality !== 'highest') {
+             // map '128', '192', '320' to --audio-quality
+             // yt-dlp --audio-quality: 0 (best) to 9 (worst) or specific bitrate like 128K
+             args.push('--audio-quality', rec.quality + 'K');
+          }
         } else {
-          console.error('[downloads] no progressive MP4 available and ffmpeg missing; cannot proceed');
+          // Video resolution control (Feature #4)
+          let formatSpec = 'bv*+ba/b';
+          if (rec.quality && rec.quality !== 'highest') {
+             // e.g. quality='1080' -> height<=1080
+             formatSpec = `bv*[height<=${rec.quality}]+ba/b[height<=${rec.quality}]`;
+          }
+          args.push('-f', formatSpec);
+          args.push('--merge-output-format', rec.format);
         }
-      }
 
-  console.log('[downloads] paths id=%s abs=%s tmp=%s', id, absPath, tempPath);
-  let stream: any;
-  let writeFile: fs.WriteStream | undefined;
-  let producedFinal = false;
-      if (rec.format === 'mp4' && !progressive && ffmpegExists) {
-        console.log('[downloads] muxing via ffmpeg at %s', ff);
-        try {
-          // Mux separate streams using ffmpeg
-          const video = ytdl(rec.url, { quality: 'highestvideo', requestOptions: { headers } });
-          const audio = ytdl(rec.url, { quality: 'highestaudio', requestOptions: { headers } });
-          const proc: any = spawn(ff, [
-            '-y',
-            '-i', 'pipe:3',
-            '-i', 'pipe:4',
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-movflags', '+faststart',
-            tempPath
-          ], { stdio: ['ignore', 'inherit', 'inherit', 'pipe', 'pipe'] });
-          // Pipe the two streams to ffmpeg
-          (video as any).pipe(proc.stdio[3]);
-          (audio as any).pipe(proc.stdio[4]);
-          stream = proc;
-          await new Promise<void>((resolve, reject) => {
-            proc.on('error', (err: any) => {
-              console.error('[downloads] ffmpeg mux error id=%s:', id, err);
-              reject(err);
-            });
-            proc.on('close', (code: number) => (code === 0 ? resolve() : reject(new Error('ffmpeg mux exit ' + code))));
-          });
-        } catch (e) {
-          if (HAS_YTDLP) {
-            await downloadWithYtDlp(rec.url, tempPath);
-          } else {
-            throw e;
-          }
-        }
-      } else {
-        if (rec.format === 'mp4' && !progressive && !ffmpegExists) {
-          console.warn('[downloads] ffmpeg not found; falling back to progressive stream attempt');
-        }
-        const tryOnce = async () => {
-          if (fs.existsSync(tempPath)) {
-            try { fs.unlinkSync(tempPath); } catch {}
-          }
-          const file = fs.createWriteStream(tempPath);
-          writeFile = file;
-          // Progressive or mp3 flow (mp3 handled later)
-          const ytdlOpts: any = rec.format === 'mp3' ? { quality: 'highestaudio' } : { format: effective };
-          ytdlOpts.requestOptions = { ...(ytdlOpts.requestOptions || {}), headers };
-          stream = ytdl(rec.url, ytdlOpts);
-          stream.on?.('error', (err: any) => console.error('[downloads] ytdl stream error id=%s:', id, err));
-          await new Promise<void>((resolve, reject) => {
-            stream.on('error', reject);
-            file.on('error', reject);
-            file.on('finish', resolve);
-            stream.pipe(file);
-          });
-        };
-        try {
-          await tryOnce();
-        } catch (err: any) {
-          if ((err?.code === 'ECONNRESET' || /aborted/i.test(String(err?.message || ''))) ) {
-            console.warn('[downloads] retry after transient error id=%s', id);
-            await tryOnce();
-          } else if (rec.format === 'mp4' && HAS_YTDLP) {
-            await downloadWithYtDlp(rec.url, tempPath);
-          } else if (rec.format === 'mp3' && HAS_YTDLP) {
-            // Produce final mp3 directly to absPath
-            await downloadWithYtDlpAudioMp3(rec.url, absPath);
-            producedFinal = true;
-          } else {
-            if ((err && (err.statusCode === 403 || /403/.test(String(err))))) {
-              console.warn('[downloads] 403 without yt-dlp; consider installing yt-dlp (brew install yt-dlp) or adding YT_COOKIE to .env');
-              if (RESOLVED_COOKIE) console.warn('[downloads] cookie present, still 403 — may be region/age restricted');
-            }
-            throw err;
-          }
-        }
-      }
-  this.ctrls.set(id, { stream, file: writeFile, tempPath });
+        args.push('-o', absPath);
+        
+        // Feature #11: Metadata Tagging
+        args.push('--add-metadata');
+        
+        // Feature 15: Thumbnail Embedding
+        args.push('--embed-thumbnail');
 
-      if (stream && (stream as any).on) {
-        let lastTime = Date.now();
-        let lastBytes = 0;
-        let total = Number(chosen.contentLength || 0);
-        stream.on('progress', (_chunkLength: number, downloaded: number, tot: number) => {
-          if (tot) total = tot;
-          const now = Date.now();
-          const dt = (now - lastTime) / 1000;
-          const db = downloaded - lastBytes;
-          const speed = dt > 0 ? db / dt : 0;
-          const eta = speed > 0 && total ? Math.max(0, Math.round((total - downloaded) / speed)) : undefined;
-          lastTime = now;
-          lastBytes = downloaded;
-          const pct = total ? Math.round((downloaded / total) * 100) : 0;
-          this.update(id, { progress: pct, size: total, downloaded, speedBps: Math.round(speed), etaSeconds: eta });
+        // Feature 12: Video Trimming
+        if (rec.startTime || rec.endTime) {
+          const start = rec.startTime || '';
+          const end = rec.endTime || '';
+          args.push('--download-sections', `*${start}-${end}`);
+          args.push('--force-keyframes-at-cuts');
+        }
+
+        // Feature 13: Volume Normalization
+        if (rec.normalize) {
+           args.push('--postprocessor-args', 'ffmpeg:-af loudnorm=I=-16:TP=-1.5:LRA=11');
+        }
+
+        // Feature 8: Cookies
+        if (cookiePath) {
+          args.push('--cookies', cookiePath);
+        }
+
+        // Feature 9: Proxy
+        if (rec.proxyUrl) {
+          args.push('--proxy', rec.proxyUrl);
+        }
+
+        // Feature 16: SponsorBlock
+        if (rec.useSponsorBlock) {
+          args.push('--sponsorblock-remove', 'all');
+        }
+
+        // Feature 3: Subtitles
+        if (rec.downloadSubtitles) {
+          args.push('--write-subs', '--write-auto-subs', '--sub-lang', 'en,.*', '--embed-subs');
+        }
+
+        // Feature 47: Rate Limit
+        if (rec.rateLimit) {
+          args.push('--limit-rate', rec.rateLimit);
+        }
+
+        args.push(rec.url);
+
+        console.log('[downloads] spawning yt-dlp', args);
+        const proc = spawn(YTDLP_BIN, args);
+        this.ctrls.set(id, { process: proc });
+
+        proc.stdout.on('data', (data) => {
+          const line = data.toString();
+          this.emit('event', { type: 'log', id, message: line } satisfies DownloadEvent);
+
+          // Parse progress: [download]  45.0% of 10.00MiB at 2.50MiB/s ETA 00:05
+          const match = line.match(/\[download\]\s+(\d+(\.\d+)?)%/);
+          if (match) {
+            const pct = parseFloat(match[1]);
+            this.update(id, { progress: pct });
+          }
         });
-      }
 
-      if (rec.format === 'mp3') {
-        if (!producedFinal) {
-          if (ffmpegExists) {
-            console.log('[downloads] converting to mp3 via ffmpeg at %s', ff);
-            const mp3Path = absPath;
-            const proc: any = spawn(ff, ['-y', '-i', tempPath, '-vn', '-acodec', 'libmp3lame', mp3Path]);
-            await new Promise<void>((resolve, reject) => {
-              proc.on('error', (err: any) => {
-                console.error('[downloads] ffmpeg mp3 error id=%s:', id, err);
-                reject(err);
-              });
-              proc.on('close', (code: number) => (code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code))));
-            });
-            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-          } else if (HAS_YTDLP) {
-            await downloadWithYtDlpAudioMp3(rec.url, absPath);
-            if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
-          } else {
-            throw new Error('Cannot produce MP3: ffmpeg not found and yt-dlp unavailable');
-          }
-        }
-      } else {
-        // mp4 path
-        fs.renameSync(tempPath, absPath);
-      }
-      const metadata = { title, thumbnail: thumbLocal || thumbnails?.[0]?.url, path: `/${path.join('files', relPath)}` };
-      fs.writeFileSync(path.join(DOWNLOAD_DIR, safe + '.json'), JSON.stringify(metadata));
-      this.update(id, { status: 'completed', relPath, filePath: absPath, progress: 100 });
+        proc.stderr.on('data', (d) => {
+             // yt-dlp sends some info to stderr
+             const line = d.toString();
+             if (!line.includes('WARNING')) console.log(`[yt-dlp stderr] ${line.trim()}`);
+        });
+
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`yt-dlp exited with code ${code}`));
+        });
+      });
+
+      // 3. Finalize
+      const metadata = {
+        title: meta.title,
+        thumbnail: thumbLocal || meta.thumbnail,
+        path: `/${path.join('files', relPath)}`
+      };
+      fs.writeFileSync(path.join(DOWNLOAD_DIR, safeTitle + '.json'), JSON.stringify(metadata));
+
+      this.update(id, { status: 'completed', progress: 100 });
     } catch (e: any) {
       const msg = e?.message || String(e);
       console.error('[downloads] run error id=%s:', id, e);
       this.update(id, { status: 'failed', error: msg });
     } finally {
-      const c = this.ctrls.get(id);
-      if (c?.tempPath && fs.existsSync(c.tempPath) && this.items.get(id)?.status !== 'completed') {
-        try { fs.unlinkSync(c.tempPath); } catch (e) { console.warn('[downloads] cleanup temp error id=%s:', id, e); }
-      }
       this.ctrls.delete(id);
+      if (cookiePath && fs.existsSync(cookiePath)) {
+        try { fs.unlinkSync(cookiePath); } catch {}
+      }
       this.running--;
       console.log('[downloads] run end id=%s running=%d queued=%d', id, this.running, this.queue.length);
       this.maybeRunNext();
@@ -430,49 +485,40 @@ class DownloadsManager extends EventEmitter {
     } catch {}
   }
 
-  retry(id: string): DownloadRecord | undefined {
+  async retry(id: string): Promise<DownloadRecord | undefined> {
     const rec = this.items.get(id);
     if (!rec) return undefined;
-    return this.enqueue({ url: rec.url, format: rec.format, quality: rec.quality });
+    const [newRec] = await this.enqueue({ url: rec.url, format: rec.format, quality: rec.quality });
+    return newRec;
   }
 
   pause(id: string) {
     const ctrl = this.ctrls.get(id);
-    if (ctrl && ctrl.stream && !ctrl.paused) {
-      ctrl.stream.pause();
-      ctrl.paused = true;
+    if (ctrl && ctrl.process) {
+      ctrl.process.kill('SIGTERM');
       this.update(id, { status: 'paused' });
     }
   }
 
   resume(id: string) {
-    const ctrl = this.ctrls.get(id);
-    if (ctrl && ctrl.stream && ctrl.paused) {
-      ctrl.stream.resume();
-      ctrl.paused = false;
-      this.update(id, { status: 'downloading' });
+    const rec = this.items.get(id);
+    if (rec && rec.status === 'paused') {
+      this.queue.push(id);
+      this.update(id, { status: 'queued' });
+      this.maybeRunNext();
     }
   }
 
   cancel(id: string) {
     const ctrl = this.ctrls.get(id);
-    if (ctrl) {
-      try { ctrl.stream?.destroy(); } catch {}
-      try { ctrl.file?.close(); } catch {}
-      if (ctrl.tempPath && fs.existsSync(ctrl.tempPath)) {
-        try { fs.unlinkSync(ctrl.tempPath); } catch {}
-      }
-      this.ctrls.delete(id);
-    } else {
-      // if queued but not started
-      const idx = this.queue.indexOf(id);
-      if (idx >= 0) this.queue.splice(idx, 1);
+    if (ctrl && ctrl.process) {
+      ctrl.process.kill('SIGKILL');
     }
+    const idx = this.queue.indexOf(id);
+    if (idx >= 0) this.queue.splice(idx, 1);
     this.update(id, { status: 'canceled' });
   }
 }
 
 export const downloadsManager = new DownloadsManager();
-console.log('[downloads] ffmpeg:', RESOLVED_FFMPEG || 'not found');
-console.log('[downloads] yt-dlp available:', HAS_YTDLP);
-if (RESOLVED_COOKIE) console.log('[downloads] using YT_COOKIE from environment');
+console.log('[downloads] using yt-dlp via spawn');

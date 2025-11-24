@@ -40,4 +40,6 @@ COPY --from=builder /app/node_modules ./node_modules
 
 EXPOSE 3000
 VOLUME ["/data"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/ || exit 1
 CMD ["node", "build"]
