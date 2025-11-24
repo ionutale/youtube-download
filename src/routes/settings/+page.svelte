@@ -20,6 +20,10 @@
   // System Stats
   let systemStats: any = null;
   let retentionDays = 0;
+  let webhookUrl = '';
+  let scheduleEnabled = false;
+  let scheduleStart = '00:00';
+  let scheduleEnd = '06:00';
 
   onMount(async () => {
     loadSystemStats();
@@ -31,19 +35,23 @@
       const data = await res.json();
       systemStats = data;
       retentionDays = data.settings.retentionDays;
+      webhookUrl = data.settings.webhookUrl || '';
+      scheduleEnabled = data.settings.scheduleEnabled || false;
+      scheduleStart = data.settings.scheduleStart || '00:00';
+      scheduleEnd = data.settings.scheduleEnd || '06:00';
     } catch (e) {
       console.error('Failed to load system stats', e);
     }
   }
 
-  async function saveRetention() {
+  async function saveSystemSettings() {
     try {
       await fetch('/api/system', {
         method: 'POST',
-        body: JSON.stringify({ retentionDays }),
+        body: JSON.stringify({ retentionDays, webhookUrl, scheduleEnabled, scheduleStart, scheduleEnd }),
         headers: { 'Content-Type': 'application/json' }
       });
-      toast.success('Retention settings saved');
+      toast.success('System settings saved');
     } catch {
       toast.error('Failed to save settings');
     }
@@ -186,11 +194,80 @@
               min="0"
               class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
             />
-            <button class="btn btn-primary" on:click={saveRetention}>Save</button>
           </div>
           <label class="label">
             <span class="label-text-alt text-[var(--text-muted)]">Set to 0 to disable auto-cleanup.</span>
           </label>
+        </div>
+
+        <!-- Webhook (Feature 43) -->
+        <div class="form-control w-full max-w-md mt-4">
+          <label class="label">
+            <span class="label-text text-[var(--text-muted)]">Webhook URL</span>
+          </label>
+          <div class="flex gap-2">
+            <input 
+              type="text" 
+              bind:value={webhookUrl} 
+              placeholder="https://discord.com/api/webhooks/..." 
+              class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
+            />
+          </div>
+          <label class="label">
+            <span class="label-text-alt text-[var(--text-muted)]">Send POST request on completion/failure.</span>
+          </label>
+        </div>
+
+        <!-- Scheduled Downloads (Feature 49) -->
+        <div class="form-control w-full max-w-md mt-4 border-t border-[var(--glass-border)] pt-4">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input type="checkbox" class="toggle toggle-primary" bind:checked={scheduleEnabled} />
+            <div class="flex flex-col">
+              <span class="label-text text-[var(--text-color)] font-bold">Enable Schedule</span>
+              <span class="label-text-alt text-[var(--text-muted)]">Only download during specific hours</span>
+            </div>
+          </label>
+          
+          {#if scheduleEnabled}
+            <div class="flex gap-4 mt-2">
+              <div class="form-control w-full">
+                <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Start Time</span></label>
+                <input type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+              </div>
+              <div class="form-control w-full">
+                <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">End Time</span></label>
+                <input type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <!-- Scheduled Downloads (Feature 49) -->
+        <div class="form-control w-full max-w-md mt-4 border-t border-[var(--glass-border)] pt-4">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input type="checkbox" class="toggle toggle-primary" bind:checked={scheduleEnabled} />
+            <div class="flex flex-col">
+              <span class="label-text text-[var(--text-color)] font-bold">Enable Schedule</span>
+              <span class="label-text-alt text-[var(--text-muted)]">Only download during specific hours</span>
+            </div>
+          </label>
+          
+          {#if scheduleEnabled}
+            <div class="flex gap-4 mt-2">
+              <div class="form-control w-full">
+                <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Start Time</span></label>
+                <input type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+              </div>
+              <div class="form-control w-full">
+                <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">End Time</span></label>
+                <input type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <div class="mt-4">
+          <button class="btn btn-primary" on:click={saveSystemSettings}>Save System Settings</button>
         </div>
       {:else}
         <div class="flex justify-center p-4">

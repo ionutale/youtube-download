@@ -6,10 +6,18 @@ const SETTINGS_FILE = path.join(DOWNLOAD_DIR, 'settings.json');
 
 export type ServerSettings = {
   retentionDays: number;
+  webhookUrl?: string;
+  scheduleEnabled?: boolean;
+  scheduleStart?: string; // HH:mm
+  scheduleEnd?: string; // HH:mm
 };
 
 const defaults: ServerSettings = {
-  retentionDays: ENV_RETENTION
+  retentionDays: ENV_RETENTION,
+  webhookUrl: '',
+  scheduleEnabled: false,
+  scheduleStart: '00:00',
+  scheduleEnd: '06:00'
 };
 
 let cached: ServerSettings | null = null;

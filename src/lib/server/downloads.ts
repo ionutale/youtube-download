@@ -49,6 +49,7 @@ export type DownloadRecord = {
   videoCodec?: 'default' | 'h264' | 'hevc';
   embedMetadata?: boolean;
   embedThumbnail?: boolean;
+  category?: string;
 };
 
 export type DownloadEvent =
@@ -68,6 +69,7 @@ class DownloadsManager extends EventEmitter {
   private queue: string[] = [];
   private running = 0;
   private saveTimer?: NodeJS.Timeout;
+  private scheduleTimer?: NodeJS.Timeout;
 
   constructor() {
     super();
@@ -87,6 +89,81 @@ class DownloadsManager extends EventEmitter {
     }
     this.maybeRunNext();
     this.scheduleCleanup();
+    this.initScheduler();
+  }
+
+  private initScheduler() {
+    // Check every minute
+    this.scheduleTimer = setInterval(() => this.checkSchedule(), 60 * 1000);
+    this.checkSchedule();
+  }
+
+  private isScheduleAllowed(): boolean {
+    const settings = getServerSettings();
+    if (!settings.scheduleEnabled) return true;
+    
+    const start = settings.scheduleStart || '00:00';
+    const end = settings.scheduleEnd || '06:00';
+    
+    const now = new Date();
+    const current = now.getHours() * 60 + now.getMinutes();
+    
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    const sMin = sh * 60 + sm;
+    const eMin = eh * 60 + em;
+
+    if (sMin < eMin) {
+      return current >= sMin && current < eMin;
+    } else {
+      // Overnight, e.g. 22:00 to 06:00
+      return current >= sMin || current < eMin;
+    }
+  }
+
+  private checkSchedule() {
+    const allowed = this.isScheduleAllowed();
+    if (allowed) {
+      // Resume paused items if they were paused due to schedule? 
+      // It's hard to distinguish user-paused vs schedule-paused without extra state.
+      // For now, let's just ensure we process the queue.
+      this.maybeRunNext();
+    } else {
+      // Pause all running downloads
+      for (const [id, rec] of this.items.entries()) {
+        if (rec.status === 'downloading') {
+          console.log('[downloads] pausing id=%s due to schedule', id);
+          this.pause(id);
+          // We should probably mark them as 'queued' instead of 'paused' so they auto-resume?
+          // If we mark as 'paused', `maybeRunNext` won't pick them up unless we explicitly resume them.
+          // If we mark as 'queued', they go back to queue.
+          // But `pause()` sets status to 'paused'.
+          // Let's change status to 'queued' and put back in queue?
+          // But `pause()` kills the process.
+          // If I just call `pause(id)`, it stays paused.
+          // I need a way to auto-resume.
+          // Let's use a special status or just rely on the fact that we want to resume everything that is 'queued' when window opens.
+          // But currently running items need to be stopped and re-queued.
+          
+          // Let's do: pause(id) -> status='paused'.
+          // Then in `checkSchedule`, if allowed, we find all 'paused' items and resume them?
+          // But what if user paused them manually?
+          // We might need a `pausedBySchedule` flag or similar.
+          // Or just keep it simple: If schedule disables, we stop everything. When schedule enables, we resume everything that is 'paused'?
+          // That might be annoying if user paused something manually.
+          // Let's just stop them and set status to 'queued' so they are ready to run again?
+          // If I set to 'queued', `maybeRunNext` will pick them up when allowed.
+          // But `pause` sets to `paused`.
+          // Let's manually kill and set to queued.
+          
+          const ctrl = this.ctrls.get(id);
+          if (ctrl && ctrl.process) ctrl.process.kill('SIGTERM');
+          this.update(id, { status: 'queued' });
+          if (!this.queue.includes(id)) this.queue.unshift(id); // Put back at front
+          this.running--;
+        }
+      }
+    }
   }
 
   private scheduleCleanup() {
@@ -170,7 +247,7 @@ class DownloadsManager extends EventEmitter {
     return { totalBytes, freeBytes };
   }
 
-  public async getPlaylistItems(url: string): Promise<string[]> {
+  public async getPlaylistItems(url: string): Promise<{ url: string; title: string; duration?: number; thumbnail?: string }[]> {
     return new Promise((resolve, reject) => {
       // --flat-playlist: do not download videos
       // --dump-single-json: output one JSON with "entries" array
@@ -183,7 +260,12 @@ class DownloadsManager extends EventEmitter {
         try {
           const data = JSON.parse(stdout);
           if (data._type === 'playlist' && Array.isArray(data.entries)) {
-             return resolve(data.entries.map((e: any) => e.url || e.original_url || `https://www.youtube.com/watch?v=${e.id}`));
+             return resolve(data.entries.map((e: any) => ({
+               url: e.url || e.original_url || `https://www.youtube.com/watch?v=${e.id}`,
+               title: e.title || 'Unknown',
+               duration: e.duration,
+               thumbnail: e.thumbnails?.[0]?.url || undefined
+             })));
           }
           resolve([]);
         } catch {
@@ -202,7 +284,7 @@ class DownloadsManager extends EventEmitter {
     return undefined;
   }
 
-  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean; downloadLyrics?: boolean; videoCodec?: 'default' | 'h264' | 'hevc'; embedMetadata?: boolean; embedThumbnail?: boolean }): Promise<DownloadRecord[]> {
+  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean; downloadLyrics?: boolean; videoCodec?: 'default' | 'h264' | 'hevc'; embedMetadata?: boolean; embedThumbnail?: boolean; category?: string }): Promise<DownloadRecord[]> {
     // Check if playlist (only if not explicitly targeting a single video ID which usually doesn't have list= param, but let's just check)
     // Optimization: only check if URL contains 'list='
     if (input.url.includes('list=')) {
@@ -210,10 +292,10 @@ class DownloadsManager extends EventEmitter {
        if (items.length > 0) {
          console.log('[downloads] expanding playlist with %d items', items.length);
          const records: DownloadRecord[] = [];
-         for (const itemUrl of items) {
+         for (const item of items) {
            // Recursively enqueue (but itemUrl won't have list= usually, or we strip it)
            // We must ensure we don't loop. getPlaylistItems returns video URLs.
-           const [single] = await this.enqueue({ ...input, url: itemUrl });
+           const [single] = await this.enqueue({ ...input, url: item.url });
            records.push(single);
          }
          return records;
@@ -243,6 +325,7 @@ class DownloadsManager extends EventEmitter {
       videoCodec: input.videoCodec,
       embedMetadata: input.embedMetadata,
       embedThumbnail: input.embedThumbnail,
+      category: input.category,
       progress: 0,
       status: 'queued',
       createdAt: now,
@@ -304,6 +387,30 @@ class DownloadsManager extends EventEmitter {
       return `/${path.join('files', 'thumbnails', safe + '.jpg')}`;
     } catch {
       return undefined;
+    }
+  }
+
+  private async sendWebhook(rec: DownloadRecord) {
+    const url = getServerSettings().webhookUrl;
+    if (!url) return;
+    
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: rec.status === 'completed' ? 'download_complete' : 'download_failed',
+          id: rec.id,
+          title: rec.title,
+          url: rec.url,
+          status: rec.status,
+          error: rec.error,
+          path: rec.relPath ? `/files/${rec.relPath}` : undefined,
+          thumbnail: rec.thumbnail
+        })
+      });
+    } catch (e) {
+      console.error('[downloads] webhook failed', e);
     }
   }
 
@@ -524,10 +631,12 @@ class DownloadsManager extends EventEmitter {
       fs.writeFileSync(path.join(DOWNLOAD_DIR, safeTitle + '.json'), JSON.stringify(metadata));
 
       this.update(id, { status: 'completed', progress: 100 });
+      this.sendWebhook(this.items.get(id)!);
     } catch (e: any) {
       const msg = e?.message || String(e);
       console.error('[downloads] run error id=%s:', id, e);
       this.update(id, { status: 'failed', error: msg });
+      this.sendWebhook(this.items.get(id)!);
     } finally {
       this.ctrls.delete(id);
       if (cookiePath && fs.existsSync(cookiePath)) {
@@ -540,6 +649,8 @@ class DownloadsManager extends EventEmitter {
   }
 
   private maybeRunNext() {
+    if (!this.isScheduleAllowed()) return;
+
     while (this.running < MAX_CONCURRENCY && this.queue.length) {
       const next = this.queue.shift();
       if (next) this.run(next);
@@ -586,7 +697,8 @@ class DownloadsManager extends EventEmitter {
       downloadLyrics: rec.downloadLyrics,
       videoCodec: rec.videoCodec,
       embedMetadata: rec.embedMetadata,
-      embedThumbnail: rec.embedThumbnail
+      embedThumbnail: rec.embedThumbnail,
+      category: rec.category
     });
     return newRec;
   }

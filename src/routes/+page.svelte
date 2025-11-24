@@ -11,6 +11,7 @@
   let startTime = '';
   let endTime = '';
   let normalizeAudio = false;
+  let category = ''; // New category state
   let downloads: any[] = [];
   let stats: { totalBytes: number; freeBytes: number } | null = null;
   let eventSource: EventSource | null = null;
@@ -18,9 +19,26 @@
   
   // Feature 31: Search & Filter
   let searchTerm = '';
-  $: filteredDownloads = downloads.filter(d => 
-    !searchTerm || (d.title && d.title.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  let filterCategory = ''; // New filter state
+  
+  // Feature 26: Speed Graph
+  let speedHistory: number[] = new Array(60).fill(0);
+  let totalSpeed = 0;
+
+  $: speedPath = `M 0 24 ${speedHistory.map((s, i) => {
+      const max = Math.max(...speedHistory, 1);
+      const h = (s / max) * 24;
+      return `L ${i * (100/59)} ${24 - h}`;
+    }).join(' ')} L 100 24 Z`;
+
+  // Get unique categories from downloads
+  $: availableCategories = Array.from(new Set(downloads.map(d => d.category).filter(Boolean))).sort();
+
+  $: filteredDownloads = downloads.filter(d => {
+    const matchesSearch = !searchTerm || (d.title && d.title.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesCategory = !filterCategory || d.category === filterCategory;
+    return matchesSearch && matchesCategory;
+  });
 
   // Feature 36: File Preview
   let previewItem: any = null;
@@ -32,6 +50,19 @@
   // Feature 35: Bulk Actions
   let selectedIds = new Set<string>();
   $: allSelected = filteredDownloads.length > 0 && selectedIds.size === filteredDownloads.length;
+
+  // Feature 1 & 2: Playlist Selection
+  let playlistItems: any[] = [];
+  let selectedPlaylistItems = new Set<string>();
+  let playlistUrl = '';
+  let isFetchingPlaylist = false;
+
+  // Feature 45: Shortcuts
+  let showShortcuts = false;
+
+  // Feature 39: Redownload UI
+  let redownloadItem: { url: string, id?: string } | null = null;
+  let resolveRedownload: ((value: boolean) => void) | null = null;
 
   function toggleSelection(id: string) {
     if (selectedIds.has(id)) {
@@ -140,198 +171,21 @@
           logs[data.id].push(data.message);
           if (logs[data.id].length > 200) logs[data.id].shift();
         }
+        
+        // Update speed stats
+        totalSpeed = downloads.reduce((acc, d) => acc + (d.status === 'downloading' ? (d.speedBps || 0) : 0), 0);
       } catch (e) {
         console.error('Event parse error', e);
       }
     };
   }
 
-  function notify(title: string, body: string) {
-    if (Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/favicon.png' });
-    }
-  }
-
-  async function requestNotificationPermission() {
-    if (Notification.permission === 'default') {
-      await Notification.requestPermission();
-    }
-  }
-
-  function formatBytes(bytes: number) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  }
-
-  async function startDownload() {
-    requestNotificationPermission();
-    if (!url) return toast.error('Please enter a URL');
-    
-    const urls = batchMode 
-      ? url.split('\n').map(u => u.trim()).filter(u => u)
-      : [url.trim()];
-
-    if (urls.length === 0) return toast.error('No valid URLs found');
-
-    let started = 0;
-    for (const targetUrl of urls) {
-      try {
-        // Feature 39: Redownload Detection
-        const checkRes = await fetch(`/api/download?check=true&url=${encodeURIComponent(targetUrl)}`);
-        if (checkRes.ok) {
-           const checkData = await checkRes.json();
-           if (checkData.exists) {
-             if (!confirm(`The URL ${targetUrl} has already been downloaded. Download again?`)) {
-               continue;
-             }
-           }
-        }
-
-        const body = {
-          url: targetUrl,
-          format,
-          quality,
-          filenamePattern: $settings.filenamePattern || '{title}',
-          startTime,
-          endTime,
-          normalize: normalizeAudio,
-          cookieContent: $settings.cookieContent || '',
-          proxyUrl: $settings.proxyUrl || '',
-          useSponsorBlock: $settings.useSponsorBlock || false,
-          downloadSubtitles: $settings.downloadSubtitles || false,
-          rateLimit: $settings.rateLimit || '',
-          organizeByUploader: $settings.organizeByUploader || false,
-          splitChapters: $settings.splitChapters || false,
-          downloadLyrics: $settings.downloadLyrics || false,
-          videoCodec: $settings.videoCodec || 'default',
-          embedMetadata: $settings.embedMetadata !== false,
-          embedThumbnail: $settings.embedThumbnail !== false
-        };
-        
-        const res = await fetch('/api/download', { 
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        
-        if (!res.ok) {
-          const err = await res.json();
-          toast.error(`Failed: ${targetUrl} - ${err.error || 'Unknown error'}`);
-        } else {
-          started++;
-        }
-      } catch (e: any) {
-        toast.error(`Error: ${targetUrl} - ${e.message}`);
-      }
-    }
-
-    if (started > 0) {
-      toast.success(`Started ${started} download${started > 1 ? 's' : ''}`);
-      url = '';
-    }
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey && !batchMode && url) {
-      e.preventDefault();
-      startDownload();
-    }
-  }
-
-  function handleGlobalKeydown(e: KeyboardEvent) {
-    // Feature 45: Keyboard Shortcuts
-    if (e.key === '/' && document.activeElement !== inputElement && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      inputElement?.focus();
-    }
-  }
-
-  // Feature 1: Smart Clipboard
-  async function checkClipboard() {
-    try {
-      if (document.hasFocus() && !url) {
-        const text = await navigator.clipboard.readText();
-        if (text && (text.includes('youtube.com') || text.includes('youtu.be'))) {
-           // Optional: Auto-paste or just suggest. For now, let's just focus input.
-           inputElement?.focus();
-        }
-      }
-    } catch {}
-  }
-
-  // Feature 8: Queue Management
-  async function controlDownload(id: string, action: 'pause' | 'resume' | 'cancel') {
-    try {
-      if (action === 'cancel') {
-        await fetch(`/api/download/${id}`, { method: 'DELETE' });
-        toast.success('Download canceled');
-      } else {
-        await fetch(`/api/download/${id}`, { 
-          method: 'PATCH', 
-          body: JSON.stringify({ action }),
-          headers: { 'Content-Type': 'application/json' }
-        });
-        toast.success(`Download ${action}d`);
-      }
-    } catch (e) {
-      toast.error(`Failed to ${action} download`);
-    }
-  }
-
-  // Feature 28: Quick Retry
-  async function retryDownload(id: string) {
-    try {
-      const res = await fetch(`/api/download/${id}`, { 
-        method: 'PATCH',
-        body: JSON.stringify({ action: 'retry' }),
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (res.ok) {
-        toast.success('Retrying download...');
-      } else {
-        toast.error('Failed to retry');
-      }
-    } catch {
-      toast.error('Failed to retry');
-    }
-  }
-
-  // Feature 26: Drag & Drop
-  let isDragging = false;
-
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    isDragging = true;
-  }
-
-  function handleDragLeave(e: DragEvent) {
-    e.preventDefault();
-    // Only set false if we left the window (relatedTarget is null)
-    if (e.relatedTarget === null) {
-      isDragging = false;
-    }
-  }
-
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    isDragging = false;
-    if (e.dataTransfer) {
-      const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
-      if (text) {
-        if (batchMode) {
-          url += (url ? '\n' : '') + text;
-        } else {
-          url = text;
-        }
-        toast.success('Link dropped!');
-      }
-    }
-  }
-
+  // Update speed history every second
   onMount(() => {
+    const interval = setInterval(() => {
+      speedHistory = [...speedHistory.slice(1), totalSpeed];
+    }, 1000);
+    
     connect();
     window.addEventListener('focus', checkClipboard);
     window.addEventListener('dragover', handleDragOver);
@@ -339,6 +193,7 @@
     window.addEventListener('drop', handleDrop);
     window.addEventListener('keydown', handleGlobalKeydown);
     return () => {
+      clearInterval(interval);
       if (eventSource) eventSource.close();
       window.removeEventListener('focus', checkClipboard);
       window.removeEventListener('dragover', handleDragOver);
@@ -465,6 +320,16 @@
                  <div class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">End Time (00:00:00)</span></div>
                  <input type="text" bind:value={endTime} placeholder="e.g. 00:02:45" class="input input-sm input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
                </div>
+               <!-- Category Input (Feature 32) -->
+               <div class="form-control">
+                 <div class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Category</span></div>
+                 <input type="text" bind:value={category} placeholder="e.g. Music, Tutorial" list="categories-list" class="input input-sm input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+                 <datalist id="categories-list">
+                   {#each availableCategories as cat}
+                     <option value={cat}></option>
+                   {/each}
+                 </datalist>
+               </div>
                <!-- Normalize -->
                <div class="form-control justify-end">
                  <label class="label cursor-pointer justify-start gap-2">
@@ -506,6 +371,40 @@
       </div>
       
       <div class="flex items-center gap-4 flex-1 justify-end">
+        <!-- Category Filter (Feature 32) -->
+        {#if availableCategories.length > 0}
+          <select bind:value={filterCategory} class="select select-sm bg-[var(--input-bg)] border border-[var(--glass-border)] text-[var(--text-color)] focus:ring-0 rounded-lg max-w-[150px]">
+            <option value="">All Categories</option>
+            {#each availableCategories as cat}
+              <option value={cat}>{cat}</option>
+            {/each}
+          </select>
+        {/if}
+
+        <!-- Speed Graph (Feature 26) -->
+        {#if totalSpeed > 0 || speedHistory.some(s => s > 0)}
+          <div class="hidden md:flex flex-col items-end mr-4">
+            <div class="text-xs font-mono text-neon-blue mb-1">
+              {(totalSpeed / 1024 / 1024).toFixed(1)} MB/s
+            </div>
+            <svg width="100" height="24" class="opacity-80">
+              <path 
+                d={speedPath} 
+                fill="url(#speed-gradient)" 
+                stroke="var(--neon-blue)" 
+                stroke-width="1"
+                vector-effect="non-scaling-stroke"
+              />
+              <defs>
+                <linearGradient id="speed-gradient" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stop-color="var(--neon-blue)" stop-opacity="0.5" />
+                  <stop offset="100%" stop-color="var(--neon-blue)" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+        {/if}
+
         <!-- Search Bar (Feature 31) -->
         <div class="flex items-center bg-[var(--input-bg)] rounded-lg px-3 py-1 border border-[var(--glass-border)] focus-within:border-neon-blue transition-colors w-full md:w-auto">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -606,9 +505,14 @@
 
             <!-- Info -->
             <div class="flex-1 min-w-0 flex flex-col justify-center">
-              <h3 class="font-bold text-[var(--text-color)] truncate pr-2" title={download.title || download.url}>
-                {download.title || 'Fetching metadata...'}
-              </h3>
+              <div class="flex items-center gap-2">
+                <h3 class="font-bold text-[var(--text-color)] truncate pr-2" title={download.title || download.url}>
+                  {download.title || 'Fetching metadata...'}
+                </h3>
+                {#if download.category}
+                  <span class="badge badge-xs badge-outline text-[var(--text-muted)]">{download.category}</span>
+                {/if}
+              </div>
               
               <div class="flex items-center justify-between mt-2 text-xs text-[var(--text-muted)]">
                 <span>{download.status}</span>
@@ -651,6 +555,56 @@
     {/if}
   </div>
 </div>
+
+<!-- Playlist Selection Modal (Feature 1 & 2) -->
+<dialog id="playlist_modal" class="modal">
+  <div class="modal-box w-11/12 max-w-3xl bg-[var(--glass-bg)] border border-[var(--glass-border)] backdrop-blur-xl">
+    <h3 class="font-bold text-lg text-[var(--text-color)] mb-4">Select Videos to Download</h3>
+    
+    <div class="flex justify-between items-center mb-4">
+      <div class="text-sm text-[var(--text-muted)]">
+        Found {playlistItems.length} videos
+      </div>
+      <button class="btn btn-sm btn-ghost text-neon-blue" on:click={togglePlaylistSelectAll}>
+        {selectedPlaylistItems.size === playlistItems.length ? 'Deselect All' : 'Select All'}
+      </button>
+    </div>
+
+    <div class="max-h-96 overflow-y-auto space-y-2 pr-2">
+      {#each playlistItems as item}
+        <label class="flex items-center gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer transition-colors border border-transparent hover:border-white/10">
+          <input 
+            type="checkbox" 
+            class="checkbox checkbox-sm checkbox-primary" 
+            checked={selectedPlaylistItems.has(item.url)} 
+            on:change={() => togglePlaylistSelection(item.url)} 
+          />
+          {#if item.thumbnail}
+            <img src={item.thumbnail} alt="" class="w-12 h-8 object-cover rounded" />
+          {/if}
+          <div class="flex-1 min-w-0">
+            <div class="font-medium text-sm text-[var(--text-color)] truncate">{item.title}</div>
+            {#if item.duration}
+              <div class="text-xs text-[var(--text-muted)]">{Math.floor(item.duration / 60)}:{(item.duration % 60).toString().padStart(2, '0')}</div>
+            {/if}
+          </div>
+        </label>
+      {/each}
+    </div>
+
+    <div class="modal-action">
+      <form method="dialog">
+        <button class="btn btn-ghost text-[var(--text-color)]">Cancel</button>
+      </form>
+      <button class="btn btn-primary" on:click={confirmPlaylistDownload} disabled={selectedPlaylistItems.size === 0}>
+        Download Selected ({selectedPlaylistItems.size})
+      </button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop">
+    <button>close</button>
+  </form>
+</dialog>
 
 <!-- Logs Modal (Feature 22) -->
 <dialog id="logs_modal" class="modal">
@@ -701,5 +655,94 @@
   </div>
   <form method="dialog" class="modal-backdrop">
     <button on:click={closePreview}>close</button>
+  </form>
+</dialog>
+
+<!-- Shortcuts Modal (Feature 45) -->
+<dialog id="shortcuts_modal" class="modal">
+  <div class="modal-box w-11/12 max-w-md bg-[var(--glass-bg)] border border-[var(--glass-border)] backdrop-blur-xl">
+    <h3 class="font-bold text-lg text-[var(--text-color)] mb-4">Keyboard Shortcuts</h3>
+    
+    <div class="grid grid-cols-1 gap-4">
+      <div class="flex items-center justify-between p-3 rounded-lg bg-black/50">
+        <div class="text-sm text-[var(--text-muted)]">
+          <kbd class="kbd kbd-sm">Ctrl</kbd> + <kbd class="kbd kbd-sm">Enter</kbd>
+        </div>
+        <div class="text-sm text-[var(--text-color)] font-medium">
+          Start Download
+        </div>
+      </div>
+      <div class="flex items-center justify-between p-3 rounded-lg bg-black/50">
+        <div class="text-sm text-[var(--text-muted)]">
+          <kbd class="kbd kbd-sm">Esc</kbd>
+        </div>
+        <div class="text-sm text-[var(--text-color)] font-medium">
+          Close Modal / Blur Input
+        </div>
+      </div>
+      <div class="flex items-center justify-between p-3 rounded-lg bg-black/50">
+        <div class="text-sm text-[var(--text-muted)]">
+          <kbd class="kbd kbd-sm">Tab</kbd> / <kbd class="kbd kbd-sm">Shift + Tab</kbd>
+        </div>
+        <div class="text-sm text-[var(--text-color)] font-medium">
+          Navigate Inputs
+        </div>
+      </div>
+      <div class="flex items-center justify-between p-3 rounded-lg bg-black/50">
+        <div class="text-sm text-[var(--text-muted)]">
+          <kbd class="kbd kbd-sm">Ctrl</kbd> + <kbd class="kbd kbd-sm">Z</kbd>
+        </div>
+        <div class="text-sm text-[var(--text-color)] font-medium">
+          Undo
+        </div>
+      </div>
+      <div class="flex items-center justify-between p-3 rounded-lg bg-black/50">
+        <div class="text-sm text-[var(--text-muted)]">
+          <kbd class="kbd kbd-sm">Ctrl</kbd> + <kbd class="kbd kbd-sm">Shift</kbd> + <kbd class="kbd kbd-sm">Z</kbd>
+        </div>
+        <div class="text-sm text-[var(--text-color)] font-medium">
+          Redo
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-action">
+      <form method="dialog">
+        <button class="btn btn-sm btn-ghost text-white">Close</button>
+      </form>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop">
+    <button>close</button>
+  </form>
+</dialog>
+
+<!-- Redownload Prompt Modal (Feature 39) -->
+<dialog id="redownload_modal" class="modal">
+  <div class="modal-box w-11/12 max-w-md bg-[var(--glass-bg)] border border-[var(--glass-border)] backdrop-blur-xl">
+    <h3 class="font-bold text-lg text-[var(--text-color)] mb-4">Redownload Video</h3>
+    
+    {#if redownloadItem}
+      <p class="text-[var(--text-muted)] text-sm mb-4">
+        This video is already downloaded. What would you like to do?
+      </p>
+      <div class="flex gap-2">
+        <button class="btn btn-primary btn-sm flex-1" on:click={() => handleRedownloadChoice(true)}>
+          Redownload
+        </button>
+        <button class="btn btn-sm btn-ghost flex-1" on:click={() => handleRedownloadChoice(false)}>
+          Skip
+        </button>
+      </div>
+    {/if}
+
+    <div class="modal-action">
+      <form method="dialog">
+        <button class="btn btn-sm btn-ghost text-white">Close</button>
+      </form>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop">
+    <button>close</button>
   </form>
 </dialog>

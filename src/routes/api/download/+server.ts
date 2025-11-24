@@ -65,6 +65,7 @@ export async function POST({ request }) {
 	const videoCodec = body.videoCodec || 'default';
 	const embedMetadata = body.embedMetadata !== false; // Default true
 	const embedThumbnail = body.embedThumbnail !== false; // Default true
+	const category = body.category || undefined;
 
 	console.log('[POST /api/download] url=%s quality=%s format=%s', videoUrl, quality, format);
 	if (!videoUrl) return json({ error: 'URL is required' }, { status: 400 });
@@ -77,7 +78,7 @@ export async function POST({ request }) {
 			url: videoUrl, format, quality, filenamePattern, startTime, endTime, normalize,
 			cookieContent, proxyUrl, useSponsorBlock, downloadSubtitles, rateLimit,
 			organizeByUploader, splitChapters, downloadLyrics, videoCodec,
-			embedMetadata, embedThumbnail
+			embedMetadata, embedThumbnail, category
 		});
 		console.log('[POST /api/download] enqueued %d items', records.length);
 		return json({ id: records[0].id, count: records.length });

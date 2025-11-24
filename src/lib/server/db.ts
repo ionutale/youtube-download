@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS downloads (
   rateLimit TEXT,
   organizeByUploader INTEGER,
   splitChapters INTEGER,
-  isFavorite INTEGER
+  isFavorite INTEGER,
+  category TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status);
 CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
@@ -65,7 +66,8 @@ CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
   const columns = [
     'filenamePattern TEXT', 'startTime TEXT', 'endTime TEXT', 'normalize INTEGER',
     'cookieContent TEXT', 'proxyUrl TEXT', 'useSponsorBlock INTEGER', 'downloadSubtitles INTEGER',
-    'rateLimit TEXT', 'organizeByUploader INTEGER', 'splitChapters INTEGER', 'isFavorite INTEGER'
+    'rateLimit TEXT', 'organizeByUploader INTEGER', 'splitChapters INTEGER', 'isFavorite INTEGER',
+    'category TEXT'
   ];
   for (const col of columns) {
     try { db.exec(`ALTER TABLE downloads ADD COLUMN ${col}`); } catch {}
@@ -73,10 +75,10 @@ CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
 
   const upsertStmt = db.prepare(`INSERT INTO downloads (
   id,url,title,filename,filePath,relPath,thumbnail,format,quality,progress,status,createdAt,updatedAt,size,downloaded,speedBps,etaSeconds,durationSeconds,error,
-  filenamePattern,startTime,endTime,normalize,cookieContent,proxyUrl,useSponsorBlock,downloadSubtitles,rateLimit,organizeByUploader,splitChapters,isFavorite
+  filenamePattern,startTime,endTime,normalize,cookieContent,proxyUrl,useSponsorBlock,downloadSubtitles,rateLimit,organizeByUploader,splitChapters,isFavorite,category
 ) VALUES (
   @id,@url,@title,@filename,@filePath,@relPath,@thumbnail,@format,@quality,@progress,@status,@createdAt,@updatedAt,@size,@downloaded,@speedBps,@etaSeconds,@durationSeconds,@error,
-  @filenamePattern,@startTime,@endTime,@normalize,@cookieContent,@proxyUrl,@useSponsorBlock,@downloadSubtitles,@rateLimit,@organizeByUploader,@splitChapters,@isFavorite
+  @filenamePattern,@startTime,@endTime,@normalize,@cookieContent,@proxyUrl,@useSponsorBlock,@downloadSubtitles,@rateLimit,@organizeByUploader,@splitChapters,@isFavorite,@category
 ) ON CONFLICT(id) DO UPDATE SET
   url=excluded.url,
   title=excluded.title,
@@ -107,7 +109,8 @@ CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(createdAt);
   rateLimit=excluded.rateLimit,
   organizeByUploader=excluded.organizeByUploader,
   splitChapters=excluded.splitChapters,
-  isFavorite=excluded.isFavorite
+  isFavorite=excluded.isFavorite,
+  category=excluded.category
 `);
 
   sqliteApi = {
