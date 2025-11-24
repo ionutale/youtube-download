@@ -64,6 +64,140 @@
   let redownloadItem: { url: string, id?: string } | null = null;
   let resolveRedownload: ((value: boolean) => void) | null = null;
 
+  let isDragging = false;
+
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    isDragging = true;
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    e.preventDefault();
+    isDragging = false;
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    isDragging = false;
+    const droppedUrl = e.dataTransfer?.getData('text/plain');
+    if (droppedUrl && (droppedUrl.includes('youtube.com') || droppedUrl.includes('youtu.be'))) {
+      url = droppedUrl;
+      startDownload();
+    }
+  }
+
+  function checkClipboard() {
+    // Optional: auto-paste if focused? Maybe annoying.
+  }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && e.key === 'Enter') {
+      startDownload();
+    }
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      startDownload();
+    }
+  }
+
+  function notify(title: string, body: string) {
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body });
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(p => {
+        if (p === 'granted') new Notification(title, { body });
+      });
+    }
+  }
+
+  async function startDownload() {
+    if (!url.trim()) return;
+    
+    const urls = batchMode ? url.split('\n').filter(u => u.trim()) : [url.trim()];
+    if (urls.length === 0) return;
+
+    let successCount = 0;
+    for (const u of urls) {
+      try {
+        const res = await fetch('/api/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: u,
+            format,
+            quality,
+            startTime,
+            endTime,
+            normalize: normalizeAudio,
+            category,
+            cookieContent: $settings.cookieContent,
+            proxyUrl: $settings.proxyUrl,
+            useSponsorBlock: $settings.useSponsorBlock,
+            downloadSubtitles: $settings.downloadSubtitles,
+            rateLimit: $settings.rateLimit,
+            organizeByUploader: $settings.organizeByUploader,
+            splitChapters: $settings.splitChapters,
+            downloadLyrics: $settings.downloadLyrics,
+            videoCodec: $settings.videoCodec,
+            embedMetadata: $settings.embedMetadata,
+            embedThumbnail: $settings.embedThumbnail
+          })
+        });
+        if (res.ok) successCount++;
+      } catch {}
+    }
+
+    if (successCount > 0) {
+      toast.success(`Started ${successCount} download(s)`);
+      url = '';
+    } else {
+      toast.error('Failed to start download');
+    }
+  }
+
+  async function controlDownload(id: string, action: 'pause' | 'resume' | 'cancel') {
+    try {
+      await fetch(`/api/download/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      });
+      toast.success(`${action} command sent`);
+    } catch {
+      toast.error(`Failed to ${action}`);
+    }
+  }
+
+  async function retryDownload(id: string) {
+    try {
+      await fetch(`/api/download/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'retry' })
+      });
+      toast.success('Retrying...');
+    } catch {
+      toast.error('Failed to retry');
+    }
+  }
+  
+  async function moveToTop(id: string) {
+    try {
+      const maxP = Math.max(...downloads.map(d => d.priority || 0), 0);
+      await fetch(`/api/download/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'setPriority', priority: maxP + 1 })
+      });
+      toast.success('Moved to top of queue');
+    } catch {
+      toast.error('Failed to change priority');
+    }
+  }
+
   function toggleSelection(id: string) {
     if (selectedIds.has(id)) {
       selectedIds.delete(id);
@@ -539,6 +673,14 @@
                     <button class="btn btn-xs btn-ghost text-yellow-400" on:click={() => controlDownload(download.id, 'pause')}>Pause</button>
                   {:else if download.status === 'paused'}
                     <button class="btn btn-xs btn-ghost text-green-400" on:click={() => controlDownload(download.id, 'resume')}>Resume</button>
+                  {/if}
+                  
+                  {#if download.status === 'queued'}
+                    <button class="btn btn-xs btn-ghost text-neon-blue" on:click={() => moveToTop(download.id)} title="Move to Top">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                      </svg>
+                    </button>
                   {/if}
                   
                   {#if ['queued', 'downloading', 'paused'].includes(download.status)}
