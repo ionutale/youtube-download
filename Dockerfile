@@ -6,6 +6,8 @@ WORKDIR /app
 ENV CI=1
 COPY pnpm-lock.yaml package.json ./
 RUN corepack enable && corepack prepare pnpm@latest --activate
+# Fix for EAGAIN errors in Docker (filesystem locking issues)
+RUN pnpm config set package-import-method copy
 RUN pnpm install --frozen-lockfile
 COPY . .
 # Build with adapter-node
