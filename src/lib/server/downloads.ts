@@ -79,8 +79,12 @@ class DownloadsManager extends EventEmitter {
     const th = path.join(DOWNLOAD_DIR, 'thumbnails');
     if (!fs.existsSync(th)) fs.mkdirSync(th, { recursive: true });
 
-    try { dbMigrateFromLegacy(); console.log('[downloads] migration complete'); } catch (e) { console.warn('[downloads] migration error', e); }
-    this.loadState();
+    this.init();
+  }
+
+  private async init() {
+    try { await dbMigrateFromLegacy(); console.log('[downloads] migration complete'); } catch (e) { console.warn('[downloads] migration error', e); }
+    await this.loadState();
     console.log('[downloads] loaded %d items from persistence', this.items.size);
     // requeue items that were in progress
     for (const rec of this.items.values()) {
@@ -176,7 +180,7 @@ class DownloadsManager extends EventEmitter {
     this.cleanup(); // run once on startup
   }
 
-  private cleanup() {
+  private async cleanup() {
     const days = getServerSettings().retentionDays;
     if (days <= 0) return;
     const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
@@ -214,7 +218,7 @@ class DownloadsManager extends EventEmitter {
       }
 
       this.items.delete(id);
-      if (rec.relPath) dbDeleteByRel(rec.relPath);
+      if (rec.relPath) await dbDeleteByRel(rec.relPath);
       this.emit('event', { type: 'remove', id } satisfies DownloadEvent);
     }
   }
@@ -719,16 +723,16 @@ class DownloadsManager extends EventEmitter {
     this.saveTimer = setTimeout(() => this.saveState(), 100);
   }
 
-  private saveState() {
+  private async saveState() {
     try {
       const data = Array.from(this.items.values());
-      for (const rec of data) dbUpsertDownload(rec);
+      for (const rec of data) await dbUpsertDownload(rec);
     } catch { }
   }
 
-  private loadState() {
+  private async loadState() {
     try {
-      const arr = dbLoadDownloads();
+      const arr = await dbLoadDownloads();
       for (const it of arr) this.items.set(it.id, it);
     } catch { }
   }
@@ -794,7 +798,7 @@ class DownloadsManager extends EventEmitter {
     }
   }
 
-  delete(ids: string[]) {
+  async delete(ids: string[]) {
     for (const id of ids) {
       const rec = this.items.get(id);
       if (!rec) continue;
@@ -817,7 +821,7 @@ class DownloadsManager extends EventEmitter {
       }
 
       this.items.delete(id);
-      if (rec.relPath) dbDeleteByRel(rec.relPath);
+      if (rec.relPath) await dbDeleteByRel(rec.relPath);
       this.emit('event', { type: 'remove', id } satisfies DownloadEvent);
     }
   }

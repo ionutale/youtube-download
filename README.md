@@ -103,7 +103,7 @@ Most configurations can be changed at runtime via the **Settings** page:
 ## 🏗️ Tech Stack
 
 - **Frontend**: SvelteKit, TailwindCSS, DaisyUI, Lucide Icons
-- **Backend**: Node.js, Better-SQLite3 (persistence), EventSource (SSE)
+- **Backend**: Node.js, MongoDB (persistence), EventSource (SSE)
 - **Core**: yt-dlp (download engine), ffmpeg (processing)
 
 ## 📝 License

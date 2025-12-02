@@ -6,15 +6,11 @@ WORKDIR /app
 ENV CI=1
 COPY pnpm-lock.yaml package.json ./
 RUN corepack enable && corepack prepare pnpm@latest --activate
-# Tools for native build (better-sqlite3)
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 RUN pnpm install --frozen-lockfile
 COPY . .
 # Build with adapter-node
 ENV SVELTE_ADAPTER=node
 RUN pnpm run build
-# Ensure native modules are compiled in builder for the target platform
-RUN pnpm rebuild better-sqlite3 && node -e "require('better-sqlite3');console.log('better-sqlite3 ok (builder)')"
 
 # 2) Runner: minimal image
 FROM node:${NODE_VERSION} AS runner
