@@ -6,6 +6,8 @@ A modern, feature-rich YouTube downloader built with **SvelteKit**, **TailwindCS
 ![SvelteKit](https://img.shields.io/badge/sveltekit-2.0-orange.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-blue.svg)
 
+![Dashboard](readme-images/image.png)
+
 ## ✨ Features
 
 ### 🎨 Modern UI/UX
