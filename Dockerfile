@@ -25,9 +25,9 @@ ENV DOWNLOAD_DIR=/data
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Install runtime tools: ffmpeg, curl (for healthcheck & downloading yt-dlp), and ca-certificates
+# Install runtime tools: ffmpeg, curl (for healthcheck & downloading yt-dlp), ca-certificates, and atomicparsley (for metadata)
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends ffmpeg curl ca-certificates python3 \
+	&& apt-get install -y --no-install-recommends ffmpeg curl ca-certificates python3 atomicparsley \
 	&& rm -rf /var/lib/apt/lists/*
 
 # Install latest yt-dlp directly
