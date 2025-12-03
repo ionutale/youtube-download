@@ -1,20 +1,5 @@
 import type { Handle } from '@sveltejs/kit';
 
-const buckets = new Map<string, { tokens: number; ts: number }>();
-const RATE = 10; // tokens per minute per IP
-
-function rateLimit(ip: string) {
-  const now = Date.now();
-  const b = buckets.get(ip) || { tokens: RATE, ts: now };
-  const elapsed = (now - b.ts) / 60000; // minutes
-  b.tokens = Math.min(RATE, b.tokens + elapsed * RATE);
-  b.ts = now;
-  if (b.tokens < 1) return false;
-  b.tokens -= 1;
-  buckets.set(ip, b);
-  return true;
-}
-
 export const handle: Handle = async ({ event, resolve }) => {
   const method = event.request.method.toUpperCase();
   let ip = 'unknown';
@@ -37,9 +22,7 @@ export const handle: Handle = async ({ event, resolve }) => {
         return new Response('Forbidden', { status: 403 });
       }
     }
-    if (!rateLimit(`${ip}:${method}`)) {
-      return new Response('Too Many Requests', { status: 429 });
-    }
+    // Rate limit removed
   }
 
   // API Key Authentication

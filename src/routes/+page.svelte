@@ -6,6 +6,7 @@
 
   let url = '';
   let batchMode = false;
+  let processPlaylist = true;
   let format: 'mp3' | 'mp4' | 'webm' | 'mkv' = 'mp4';
   let quality = 'highest';
   let showAdvanced = false;
@@ -23,6 +24,8 @@
   
   let speedHistory: number[] = new Array(60).fill(0);
   let totalSpeed = 0;
+
+  $: isPlaylistUrl = url.includes('list=');
 
   $: speedPath = `M 0 24 ${speedHistory.map((s, i) => {
       const max = Math.max(...speedHistory, 1);
@@ -119,6 +122,7 @@
             url: u,
             format,
             quality,
+            processPlaylist: isPlaylistUrl ? processPlaylist : true,
             startTime,
             endTime,
             normalize: normalizeAudio,
@@ -436,6 +440,13 @@
             <span class="label-text text-xs text-[var(--text-muted)]">{$t('label.batch_mode')}</span> 
             <input type="checkbox" class="toggle toggle-xs toggle-primary" bind:checked={batchMode} />
           </label>
+
+          {#if isPlaylistUrl && !batchMode}
+            <label class="label cursor-pointer gap-2">
+              <span class="label-text text-xs text-[var(--text-muted)]">Playlist</span> 
+              <input type="checkbox" class="toggle toggle-xs toggle-secondary" bind:checked={processPlaylist} />
+            </label>
+          {/if}
 
           <!-- Format & Download -->
           <div class="flex items-center gap-2">
