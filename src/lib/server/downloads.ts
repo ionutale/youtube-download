@@ -290,7 +290,7 @@ class DownloadsManager extends EventEmitter {
     return undefined;
   }
 
-  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean; downloadLyrics?: boolean; videoCodec?: 'default' | 'h264' | 'hevc'; embedMetadata?: boolean; embedThumbnail?: boolean; category?: string }): Promise<DownloadRecord[]> {
+  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv' | 'video-only'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean; downloadLyrics?: boolean; videoCodec?: 'default' | 'h264' | 'hevc'; embedMetadata?: boolean; embedThumbnail?: boolean; category?: string }): Promise<DownloadRecord[]> {
     // Check if playlist (only if not explicitly targeting a single video ID which usually doesn't have list= param, but let's just check)
     // Optimization: only check if URL contains 'list='
     if (input.url.includes('list=')) {

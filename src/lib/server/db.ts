@@ -62,7 +62,7 @@ export async function dbCompletedHistory(): Promise<Array<{ title: string; path:
       .sort({ createdAt: -1 })
       .project({ title: 1, relPath: 1, thumbnail: 1 })
       .toArray();
-    
+
     return rows.map((r: any) => ({
       title: r.title,
       path: `/${path.join('files', r.relPath)}`,
@@ -96,8 +96,8 @@ export async function dbMigrateFromLegacy() {
         if (arr.length > 0) {
           console.log('[db] Migrating %d records from JSON to MongoDB', arr.length);
           for (const rec of arr) {
-             const { _id, ...rest } = rec as any;
-             await db.collection('downloads').updateOne({ id: rec.id }, { $set: rest }, { upsert: true });
+            const { _id, ...rest } = rec as any;
+            await db.collection('downloads').updateOne({ id: rec.id }, { $set: rest }, { upsert: true });
           }
         }
       } catch (e) {
@@ -106,5 +106,27 @@ export async function dbMigrateFromLegacy() {
     }
   } catch (e) {
     console.error('[db] migration error', e);
+  }
+}
+export async function dbUpsertUser(user: any) {
+  try {
+    const db = await getDb();
+    await db.collection('users').updateOne(
+      { username: user.username },
+      { $set: user },
+      { upsert: true }
+    );
+  } catch (e) {
+    console.error('[db] upsert user error', e);
+  }
+}
+
+export async function dbGetUser(username: string) {
+  try {
+    const db = await getDb();
+    return await db.collection('users').findOne({ username });
+  } catch (e) {
+    console.error('[db] get user error', e);
+    return null;
   }
 }
