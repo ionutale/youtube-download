@@ -22,7 +22,7 @@ export type DownloadRecord = {
   filePath?: string; // absolute path
   relPath?: string; // relative path under DOWNLOAD_DIR
   thumbnail?: string; // may be local /files/thumbnails/<name>
-  format: 'mp3' | 'mp4' | 'webm' | 'mkv';
+  format: 'mp3' | 'mp4' | 'webm' | 'mkv' | 'video-only';
   quality?: string;
   progress: number; // 0-100
   status: DownloadStatus;
@@ -501,6 +501,16 @@ class DownloadsManager extends EventEmitter {
             // yt-dlp --audio-quality: 0 (best) to 9 (worst) or specific bitrate like 128K
             args.push('--audio-quality', rec.quality + 'K');
           }
+        } else if (rec.format === 'video-only') {
+          // Feature 19: Video Only (Muted)
+          // Download best video only
+          let formatSpec = 'bv';
+          if (rec.quality && rec.quality !== 'highest') {
+            formatSpec = `bv[height<=${rec.quality}]`;
+          }
+          args.push('-f', formatSpec);
+          // Ensure container is mp4 or mkv
+          args.push('--merge-output-format', 'mp4');
         } else {
           // Video resolution control (Feature #4)
           let formatSpec = 'bv*+ba/b';

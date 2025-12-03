@@ -69,7 +69,19 @@
     }
   }
 
-  function checkClipboard() {}
+  async function checkClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && (text.includes('youtube.com') || text.includes('youtu.be'))) {
+        if (text !== url) {
+          url = text;
+          toast.success('Pasted link from clipboard');
+        }
+      }
+    } catch (e) {
+      // Clipboard access denied or empty
+    }
+  }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
     if (e.ctrlKey && e.key === 'Enter') startDownload();
@@ -449,6 +461,7 @@
               <option value="mkv">MKV</option>
               <option value="webm">WEBM</option>
               <option value="mp3">MP3</option>
+              <option value="video-only">Video Only (Muted)</option>
             </select>
             
             <button 
@@ -456,6 +469,16 @@
               class="btn btn-primary bg-gradient-to-r from-neon-blue to-neon-purple border-none text-white hover:scale-105 transition-transform shadow-lg shadow-neon-blue/20"
             >
               {batchMode ? $t('btn.download_all') : $t('btn.download')}
+            </button>
+            
+            <button 
+              on:click={checkClipboard}
+              class="btn btn-square btn-sm btn-ghost text-[var(--text-muted)] hover:text-[var(--text-color)]"
+              title="Paste from Clipboard"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
             </button>
           </div>
         </div>
