@@ -42,3 +42,14 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
     }
   }
 });
+
+document.getElementById('openBtn').addEventListener('click', async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab && tab.url) {
+    const settings = await chrome.storage.sync.get({ serverUrl: 'http://localhost:5173' });
+    const serverUrl = settings.serverUrl.replace(/\/$/, '');
+    const targetUrl = `${serverUrl}/?url=${encodeURIComponent(tab.url)}`;
+    chrome.tabs.create({ url: targetUrl });
+    window.close();
+  }
+});

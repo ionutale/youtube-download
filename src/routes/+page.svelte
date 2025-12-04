@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { toast } from 'svelte-sonner';
+  import { page } from '$app/stores';
   import { settings } from '$lib/stores';
   import { t } from '$lib/i18n';
 
@@ -350,6 +351,11 @@
   }
 
   onMount(() => {
+    const queryUrl = $page.url.searchParams.get('url');
+    if (queryUrl) {
+      url = queryUrl;
+    }
+
     const interval = setInterval(() => {
       speedHistory = [...speedHistory.slice(1), totalSpeed];
     }, 1000);
