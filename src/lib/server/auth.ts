@@ -22,7 +22,7 @@ export function getApiKey(): string | undefined {
 export function revokeApiKey() {
   updateServerSettings({ apiKey: undefined });
 }
-import { dbGetUser, dbUpsertUser } from './db';
+import { dbGetUser, dbUpsertUser, dbGetUserByToken } from './db';
 // crypto is already imported at top of file
 
 
@@ -53,6 +53,5 @@ export async function loginUser(username: string, password: string): Promise<str
 }
 
 export async function verifySession(token: string): Promise<any | null> {
-  // TODO: Implement session verification
-  return null;
+  return await dbGetUserByToken(token);
 }

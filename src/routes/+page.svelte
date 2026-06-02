@@ -492,6 +492,7 @@
               on:click={checkClipboard}
               class="btn btn-square btn-sm btn-ghost text-[var(--text-muted)] hover:text-[var(--text-color)]"
               title="Paste from Clipboard"
+              aria-label="Paste from Clipboard"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -660,6 +661,7 @@
               class="absolute top-2 right-2 z-20 btn btn-circle btn-xs btn-ghost {download.isFavorite ? 'text-yellow-400 opacity-100' : 'text-gray-500 opacity-0 group-hover:opacity-100'}"
               on:click={() => toggleFavorite(download.id, download.isFavorite)}
               title="Toggle Favorite"
+              aria-label="Toggle Favorite"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
@@ -736,7 +738,7 @@
                 <div class="flex gap-2 mt-1">
                   <!-- Feature 8: Queue Management -->
                   {#if download.status === 'queued'}
-                    <button class="btn btn-xs btn-ghost text-neon-blue" on:click={() => moveToTop(download.id)} title="Move to Top">
+                    <button class="btn btn-xs btn-ghost text-neon-blue" on:click={() => moveToTop(download.id)} title="Move to Top" aria-label="Move to Top">
                       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
                       </svg>
@@ -745,11 +747,11 @@
 
                   {#if download.status === 'downloading'}
                     <button class="btn btn-xs btn-ghost text-yellow-400" on:click={() => controlDownload(download.id, 'pause')}>Pause</button>
-                  {:else if download.status === 'paused'}
+                  {:else if download.status === 'paused' || download.status === 'suspended'}
                     <button class="btn btn-xs btn-ghost text-green-400" on:click={() => controlDownload(download.id, 'resume')}>Resume</button>
                   {/if}
                   
-                  {#if ['queued', 'downloading', 'paused'].includes(download.status)}
+                  {#if ['queued', 'downloading', 'paused', 'suspended'].includes(download.status)}
                     <button class="btn btn-xs btn-ghost text-red-400" on:click={() => controlDownload(download.id, 'cancel')}>Cancel</button>
                   {/if}
 

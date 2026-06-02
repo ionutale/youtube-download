@@ -40,17 +40,17 @@
     </h1>
     
     <div class="form-control">
-      <label class="label">
+      <label class="label" for="login-username">
         <span class="label-text text-[var(--text-muted)]">Username</span>
       </label>
-      <input type="text" bind:value={username} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+      <input id="login-username" type="text" bind:value={username} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
     </div>
 
     <div class="form-control">
-      <label class="label">
+      <label class="label" for="login-password">
         <span class="label-text text-[var(--text-muted)]">Password</span>
       </label>
-      <input type="password" bind:value={password} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+      <input id="login-password" type="password" bind:value={password} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
     </div>
 
     <button class="btn btn-primary w-full" on:click={handleSubmit}>

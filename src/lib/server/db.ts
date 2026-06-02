@@ -111,9 +111,10 @@ export async function dbMigrateFromLegacy() {
 export async function dbUpsertUser(user: any) {
   try {
     const db = await getDb();
+    const { _id, ...rest } = user;
     await db.collection('users').updateOne(
       { username: user.username },
-      { $set: user },
+      { $set: rest },
       { upsert: true }
     );
   } catch (e) {
@@ -127,6 +128,16 @@ export async function dbGetUser(username: string) {
     return await db.collection('users').findOne({ username });
   } catch (e) {
     console.error('[db] get user error', e);
+    return null;
+  }
+}
+
+export async function dbGetUserByToken(token: string) {
+  try {
+    const db = await getDb();
+    return await db.collection('users').findOne({ token });
+  } catch (e) {
+    console.error('[db] get user by token error', e);
     return null;
   }
 }

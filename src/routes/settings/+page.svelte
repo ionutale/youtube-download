@@ -202,7 +202,7 @@
       </h2>
       
       <div class="form-control w-full max-w-xs">
-        <label class="label">
+        <label class="label" for="setting-accent-color">
           <span class="label-text text-[var(--text-muted)]">Accent Color</span>
         </label>
         <div class="flex gap-2">
@@ -213,6 +213,7 @@
           />
           <input 
             type="text" 
+            id="setting-accent-color"
             bind:value={primaryColor} 
             class="input input-bordered flex-1 bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
@@ -221,10 +222,10 @@
 
 
       <div class="form-control w-full max-w-xs mt-4">
-        <label class="label">
+        <label class="label" for="setting-language">
           <span class="label-text text-[var(--text-muted)]">Language</span>
         </label>
-        <select bind:value={language} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
+        <select id="setting-language" bind:value={language} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
           <option value="en">English</option>
           <option value="it">Italiano</option>
         </select>
@@ -279,36 +280,38 @@
 
         <!-- Auto Cleanup -->
         <div class="form-control w-full max-w-md">
-          <label class="label">
+          <label class="label" for="setting-retention">
             <span class="label-text text-[var(--text-muted)]">Auto-delete downloads after (days)</span>
           </label>
           <div class="flex gap-2">
             <input 
               type="number" 
+              id="setting-retention"
               bind:value={retentionDays} 
               min="0"
               class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
             />
           </div>
-          <label class="label">
+          <label class="label" for="setting-retention">
             <span class="label-text-alt text-[var(--text-muted)]">Set to 0 to disable auto-cleanup.</span>
           </label>
         </div>
 
         <!-- Webhook (Feature 43) -->
         <div class="form-control w-full max-w-md mt-4">
-          <label class="label">
+          <label class="label" for="setting-webhook">
             <span class="label-text text-[var(--text-muted)]">Webhook URL</span>
           </label>
           <div class="flex gap-2">
             <input 
               type="text" 
+              id="setting-webhook"
               bind:value={webhookUrl} 
               placeholder="https://discord.com/api/webhooks/..." 
               class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
             />
           </div>
-          <label class="label">
+          <label class="label" for="setting-webhook">
             <span class="label-text-alt text-[var(--text-muted)]">Send POST request on completion/failure.</span>
           </label>
         </div>
@@ -325,8 +328,8 @@
           
           {#if cloudSyncEnabled}
             <div class="form-control w-full mt-2">
-              <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Provider</span></label>
-              <select bind:value={cloudProvider} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
+              <label class="label py-0" for="setting-cloud-provider"><span class="label-text-alt text-[var(--text-muted)]">Provider</span></label>
+              <select id="setting-cloud-provider" bind:value={cloudProvider} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
                 <option value="google_drive">Google Drive</option>
                 <option value="dropbox">Dropbox</option>
                 <option value="s3">Amazon S3</option>
@@ -348,12 +351,12 @@
           {#if scheduleEnabled}
             <div class="flex gap-4 mt-2">
               <div class="form-control w-full">
-                <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">Start Time</span></label>
-                <input type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+                <label class="label py-0" for="setting-schedule-start"><span class="label-text-alt text-[var(--text-muted)]">Start Time</span></label>
+                <input id="setting-schedule-start" type="time" bind:value={scheduleStart} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
               </div>
               <div class="form-control w-full">
-                <label class="label py-0"><span class="label-text-alt text-[var(--text-muted)]">End Time</span></label>
-                <input type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
+                <label class="label py-0" for="setting-schedule-end"><span class="label-text-alt text-[var(--text-muted)]">End Time</span></label>
+                <input id="setting-schedule-end" type="time" bind:value={scheduleEnd} class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" />
               </div>
             </div>
           {/if}
@@ -361,11 +364,12 @@
 
         <!-- Max Concurrency (Feature 30) -->
         <div class="form-control w-full max-w-md mt-4">
-          <label class="label">
+          <label class="label" for="setting-max-concurrency">
             <span class="label-text text-[var(--text-muted)]">Max Concurrent Downloads</span>
           </label>
           <input 
             type="number" 
+            id="setting-max-concurrency"
             bind:value={maxConcurrency} 
             min="1"
             max="10"
@@ -375,11 +379,12 @@
 
         <!-- User Agent (Feature 10) -->
         <div class="form-control w-full max-w-md mt-4">
-          <label class="label">
+          <label class="label" for="setting-user-agent">
             <span class="label-text text-[var(--text-muted)]">Custom User Agent</span>
           </label>
           <input 
             type="text" 
+            id="setting-user-agent"
             bind:value={userAgent} 
             placeholder="Mozilla/5.0..." 
             class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
@@ -388,17 +393,18 @@
 
         <!-- Max Retries (Feature 29) -->
         <div class="form-control w-full max-w-md mt-4">
-          <label class="label">
+          <label class="label" for="setting-max-retries">
             <span class="label-text text-[var(--text-muted)]">Auto-Retry Attempts</span>
           </label>
           <input 
             type="number" 
+            id="setting-max-retries"
             bind:value={maxRetries} 
             min="0"
             max="10"
             class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full" 
           />
-          <label class="label">
+          <label class="label" for="setting-max-retries">
             <span class="label-text-alt text-[var(--text-muted)]">Number of times to retry failed downloads automatically.</span>
           </label>
         </div>
@@ -425,7 +431,7 @@
       </h2>
 
       <div class="form-control w-full max-w-md">
-        <label class="label">
+        <label class="label" for="setting-api-key">
           <span class="label-text text-[var(--text-color)] font-bold">API Key</span>
         </label>
         
@@ -433,6 +439,7 @@
           <div class="flex gap-2">
             <input 
               type={showKey ? "text" : "password"} 
+              id="setting-api-key"
               value={apiKey} 
               readonly
               class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue w-full font-mono text-sm" 
@@ -453,7 +460,7 @@
           <div class="text-sm text-[var(--text-muted)] mb-2">No API Key configured. External access is open (or restricted depending on network).</div>
           <button class="btn btn-primary btn-sm" on:click={generateKey}>Generate API Key</button>
         {/if}
-        <label class="label">
+        <label class="label" for="setting-api-key">
           <span class="label-text-alt text-[var(--text-muted)]">Use <code>x-api-key</code> header for external tools.</span>
         </label>
       </div>
@@ -469,16 +476,17 @@
       </h2>
       
       <div class="form-control w-full max-w-md">
-        <label class="label">
+        <label class="label" for="setting-filename-pattern">
           <span class="label-text text-[var(--text-muted)]">Filename Pattern</span>
         </label>
         <input 
           type="text" 
+          id="setting-filename-pattern"
           bind:value={pattern} 
           placeholder={'{title}'} 
           class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
         />
-        <label class="label">
+        <label class="label" for="setting-filename-pattern">
           <span class="label-text-alt text-[var(--text-muted)]">
             Available variables: <code class="bg-black/20 px-1 rounded">{'{title}'}</code>, <code class="bg-black/20 px-1 rounded">{'{id}'}</code>, <code class="bg-black/20 px-1 rounded">{'{uploader}'}</code>, <code class="bg-black/20 px-1 rounded">{'{date}'}</code>
           </span>
@@ -510,12 +518,13 @@
       </h2>
       
       <div class="form-control w-full max-w-md mb-4">
-        <label class="label">
+        <label class="label" for="setting-rss-feed">
           <span class="label-text text-[var(--text-muted)]">Add YouTube RSS Feed</span>
         </label>
         <div class="flex gap-2">
           <input 
             type="text" 
+            id="setting-rss-feed"
             bind:value={newFeedUrl} 
             placeholder="https://www.youtube.com/feeds/videos.xml?channel_id=..." 
             class="input input-bordered flex-1 bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
@@ -529,7 +538,7 @@
           {#each rssFeeds as feed}
             <div class="flex items-center justify-between p-3 rounded-lg bg-black/20 border border-[var(--glass-border)]">
               <span class="text-sm text-[var(--text-color)] truncate flex-1 mr-2" title={feed}>{feed}</span>
-              <button class="btn btn-ghost btn-xs text-red-400 hover:bg-red-900/20" on:click={() => removeFeed(feed)}>
+              <button class="btn btn-ghost btn-xs text-red-400 hover:bg-red-900/20" aria-label="Remove feed" on:click={() => removeFeed(feed)}>
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -554,11 +563,12 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Proxy (Feature 9) -->
         <div class="form-control w-full">
-          <label class="label">
+          <label class="label" for="setting-proxy">
             <span class="label-text text-[var(--text-muted)]">Proxy URL</span>
           </label>
           <input 
             type="text" 
+            id="setting-proxy"
             bind:value={proxyUrl} 
             placeholder="http://user:pass@host:port" 
             class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
@@ -567,11 +577,12 @@
 
         <!-- Rate Limit (Feature 47) -->
         <div class="form-control w-full">
-          <label class="label">
+          <label class="label" for="setting-rate-limit">
             <span class="label-text text-[var(--text-muted)]">Rate Limit</span>
           </label>
           <input 
             type="text" 
+            id="setting-rate-limit"
             bind:value={rateLimit} 
             placeholder="e.g. 5M, 500K" 
             class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
@@ -580,11 +591,12 @@
 
         <!-- Max Concurrency (Feature 30) -->
         <div class="form-control w-full">
-          <label class="label">
+          <label class="label" for="setting-max-concurrency-2">
             <span class="label-text text-[var(--text-muted)]">Max Concurrent Downloads</span>
           </label>
           <input 
             type="number" 
+            id="setting-max-concurrency-2"
             bind:value={maxConcurrency} 
             min="1"
             max="10"
@@ -594,8 +606,8 @@
 
         <!-- User Agent (Feature 10) -->
         <div class="form-control w-full">
-          <label class="label">
-            <span class="label-text text-[var,--text-muted)]">Custom User Agent</span>
+          <label class="label" for="setting-user-agent-2">
+            <span class="label-text text-[var(--text-muted)]">Custom User Agent</span>
           </label>
           <input 
             type="text" 
@@ -607,17 +619,18 @@
 
         <!-- Max Retries (Feature 29) -->
         <div class="form-control w-full">
-          <label class="label">
+          <label class="label" for="setting-max-retries-2">
             <span class="label-text text-[var(--text-muted)]">Auto-Retry Attempts</span>
           </label>
           <input 
             type="number" 
+            id="setting-max-retries-2"
             bind:value={maxRetries} 
             min="0"
             max="10"
             class="input input-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue" 
           />
-          <label class="label">
+          <label class="label" for="setting-max-retries-2">
             <span class="label-text-alt text-[var(--text-muted)]">Number of times to retry failed downloads automatically.</span>
           </label>
         </div>
@@ -625,15 +638,16 @@
 
       <!-- Cookies (Feature 8) -->
       <div class="form-control w-full mt-4">
-        <label class="label">
+        <label class="label" for="setting-cookies">
           <span class="label-text text-[var(--text-muted)]">Cookies (Netscape format)</span>
         </label>
         <textarea 
+          id="setting-cookies"
           bind:value={cookieContent} 
           placeholder="# Netscape HTTP Cookie File..." 
           class="textarea textarea-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue h-32 font-mono text-xs"
         ></textarea>
-        <label class="label">
+        <label class="label" for="setting-cookies">
           <span class="label-text-alt text-[var(--text-muted)]">Paste content of cookies.txt here to access age-restricted videos.</span>
         </label>
       </div>
@@ -706,15 +720,15 @@
 
         <!-- Video Codec (Feature 20) -->
         <div class="form-control w-full max-w-md mt-2">
-          <label class="label">
+          <label class="label" for="setting-video-codec">
             <span class="label-text text-[var(--text-color)] font-bold">Video Codec Preference</span>
           </label>
-          <select bind:value={videoCodec} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
+          <select id="setting-video-codec" bind:value={videoCodec} class="select select-bordered bg-[var(--input-bg)] text-[var(--text-color)] border-[var(--glass-border)] focus:border-neon-blue">
             <option value="default">Default (Best Compatibility)</option>
             <option value="h264">H.264 (Most Compatible)</option>
             <option value="hevc">HEVC/H.265 (High Compression)</option>
           </select>
-          <label class="label">
+          <label class="label" for="setting-video-codec">
             <span class="label-text-alt text-[var(--text-muted)]">Prefer specific video codec when available.</span>
           </label>
         </div>

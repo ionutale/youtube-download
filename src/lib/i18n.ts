@@ -22,6 +22,7 @@ const translations = {
     'status.queued': 'Queued',
     'status.downloading': 'Downloading',
     'status.paused': 'Paused',
+    'status.suspended': 'Suspended',
     'status.completed': 'Completed',
     'status.failed': 'Failed',
     'status.canceled': 'Canceled'
@@ -46,6 +47,7 @@ const translations = {
     'status.queued': 'In coda',
     'status.downloading': 'Scaricamento',
     'status.paused': 'In pausa',
+    'status.suspended': 'Sospeso',
     'status.completed': 'Completato',
     'status.failed': 'Fallito',
     'status.canceled': 'Annullato'

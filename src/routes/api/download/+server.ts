@@ -3,10 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { downloadsManager } from '$lib/server/downloads';
 import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR } from '$lib/server/config';
-
-function sanitizeName(name: string) {
-	return name.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 120);
-}
+import { isValidUrl } from '$lib/server/util';
 
 export async function GET({ url }) {
 	const videoUrl = url.searchParams.get('url');
@@ -20,8 +17,8 @@ export async function GET({ url }) {
 	const quality = url.searchParams.get('quality') || DEFAULT_QUALITY;
 	console.log('[GET /api/download] url=%s quality=%s', videoUrl, quality);
 	if (!videoUrl) return json({ error: 'URL is required' }, { status: 400 });
-	if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(videoUrl)) {
-		return json({ error: 'Only YouTube URLs are allowed' }, { status: 400 });
+	if (!isValidUrl(videoUrl)) {
+		return json({ error: 'Invalid URL' }, { status: 400 });
 	}
 	try {
 		const info = await downloadsManager.getMetadata(videoUrl);
@@ -49,7 +46,7 @@ export async function POST({ request }) {
 	
 	const videoUrl = body.url;
 	const quality = body.quality || DEFAULT_QUALITY;
-	const format = (body.format as 'mp3' | 'mp4') || DEFAULT_FORMAT;
+	const format = (body.format as 'mp3' | 'mp4' | 'webm' | 'mkv' | 'video-only') || DEFAULT_FORMAT;
 	const filenamePattern = body.filenamePattern || undefined;
 	const startTime = body.startTime || undefined;
 	const endTime = body.endTime || undefined;
@@ -70,8 +67,8 @@ export async function POST({ request }) {
 
 	console.log('[POST /api/download] url=%s quality=%s format=%s playlist=%s', videoUrl, quality, format, processPlaylist);
 	if (!videoUrl) return json({ error: 'URL is required' }, { status: 400 });
-	if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(videoUrl)) {
-		return json({ error: 'Only YouTube URLs are allowed' }, { status: 400 });
+	if (!isValidUrl(videoUrl)) {
+		return json({ error: 'Invalid URL' }, { status: 400 });
 	}
 
 	try {

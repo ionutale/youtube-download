@@ -5,6 +5,7 @@ import fs from 'fs';
 import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR } from './config';
 import { getServerSettings } from './settings';
 import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload, dbDeleteByRel } from './db';
+import { parseProgressLine, isScheduleAllowed, findExistingByUrl } from './util';
 import { spawn } from 'child_process';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
@@ -12,7 +13,7 @@ import { Readable } from 'stream';
 // We rely on yt-dlp being available in the system (installed via Dockerfile)
 const YTDLP_BIN = 'yt-dlp';
 
-export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled';
+export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'suspended' | 'completed' | 'failed' | 'canceled';
 
 export type DownloadRecord = {
   id: string;
@@ -104,68 +105,26 @@ class DownloadsManager extends EventEmitter {
     this.checkSchedule();
   }
 
-  private isScheduleAllowed(): boolean {
-    const settings = getServerSettings();
-    if (!settings.scheduleEnabled) return true;
-
-    const start = settings.scheduleStart || '00:00';
-    const end = settings.scheduleEnd || '06:00';
-
-    const now = new Date();
-    const current = now.getHours() * 60 + now.getMinutes();
-
-    const [sh, sm] = start.split(':').map(Number);
-    const [eh, em] = end.split(':').map(Number);
-    const sMin = sh * 60 + sm;
-    const eMin = eh * 60 + em;
-
-    if (sMin < eMin) {
-      return current >= sMin && current < eMin;
-    } else {
-      // Overnight, e.g. 22:00 to 06:00
-      return current >= sMin || current < eMin;
-    }
-  }
-
   private checkSchedule() {
-    const allowed = this.isScheduleAllowed();
+    const allowed = isScheduleAllowed(getServerSettings());
     if (allowed) {
-      // Resume paused items if they were paused due to schedule? 
-      // It's hard to distinguish user-paused vs schedule-paused without extra state.
-      // For now, let's just ensure we process the queue.
+      // Resume all suspended items
+      for (const [id, rec] of this.items.entries()) {
+        if (rec.status === 'suspended') {
+          console.log('[downloads] resuming suspended id=%s', id);
+          this.update(id, { status: 'queued' });
+          if (!this.queue.includes(id)) this.queue.push(id);
+        }
+      }
       this.maybeRunNext();
     } else {
-      // Pause all running downloads
+      // Suspend all running downloads
       for (const [id, rec] of this.items.entries()) {
         if (rec.status === 'downloading') {
-          console.log('[downloads] pausing id=%s due to schedule', id);
-          this.pause(id);
-          // We should probably mark them as 'queued' instead of 'paused' so they auto-resume?
-          // If we mark as 'paused', `maybeRunNext` won't pick them up unless we explicitly resume them.
-          // If we mark as 'queued', they go back to queue.
-          // But `pause()` sets status to 'paused'.
-          // Let's change status to 'queued' and put back in queue?
-          // But `pause()` kills the process.
-          // If I just call `pause(id)`, it stays paused.
-          // I need a way to auto-resume.
-          // Let's use a special status or just rely on the fact that we want to resume everything that is 'queued' when window opens.
-          // But currently running items need to be stopped and re-queued.
-
-          // Let's do: pause(id) -> status='paused'.
-          // Then in `checkSchedule`, if allowed, we find all 'paused' items and resume them?
-          // But what if user paused them manually?
-          // We might need a `pausedBySchedule` flag or similar.
-          // Or just keep it simple: If schedule disables, we stop everything. When schedule enables, we resume everything that is 'paused'?
-          // That might be annoying if user paused something manually.
-          // Let's just stop them and set status to 'queued' so they are ready to run again?
-          // If I set to 'queued', `maybeRunNext` will pick them up when allowed.
-          // But `pause` sets to `paused`.
-          // Let's manually kill and set to queued.
-
+          console.log('[downloads] suspending id=%s due to schedule', id);
           const ctrl = this.ctrls.get(id);
           if (ctrl && ctrl.process) ctrl.process.kill('SIGTERM');
-          this.update(id, { status: 'queued' });
-          if (!this.queue.includes(id)) this.queue.unshift(id); // Put back at front
+          this.update(id, { status: 'suspended' });
           this.running--;
         }
       }
@@ -235,16 +194,15 @@ class DownloadsManager extends EventEmitter {
     let totalBytes = 0;
     let freeBytes = 0;
     try {
-      // Calculate total size of download dir
-      const files = fs.readdirSync(DOWNLOAD_DIR);
-      for (const file of files) {
-        try {
-          const stat = fs.statSync(path.join(DOWNLOAD_DIR, file));
-          if (stat.isFile()) totalBytes += stat.size;
-        } catch { }
-      }
-      // Check free space (requires 'df' or similar, but let's just return used for now or use fs.statfs if node 18+)
-      // Node 18.15+ has fs.statfsSync
+      const walk = (dir: string) => {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(fullPath);
+          else if (entry.isFile()) totalBytes += fs.statSync(fullPath).size;
+        }
+      };
+      walk(DOWNLOAD_DIR);
       if ((fs as any).statfsSync) {
         const stats = (fs as any).statfsSync(DOWNLOAD_DIR);
         freeBytes = stats.bavail * stats.bsize;
@@ -282,12 +240,7 @@ class DownloadsManager extends EventEmitter {
   }
 
   checkExists(url: string): DownloadRecord | undefined {
-    for (const rec of this.items.values()) {
-      if (rec.status === 'completed' && rec.url === url) {
-        return rec;
-      }
-    }
-    return undefined;
+    return findExistingByUrl(Array.from(this.items.values()), url);
   }
 
   async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv' | 'video-only'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean; downloadLyrics?: boolean; videoCodec?: 'default' | 'h264' | 'hevc'; embedMetadata?: boolean; embedThumbnail?: boolean; category?: string; processPlaylist?: boolean }): Promise<DownloadRecord[]> {
@@ -630,11 +583,9 @@ class DownloadsManager extends EventEmitter {
           const line = data.toString();
           this.emit('event', { type: 'log', id, message: line } satisfies DownloadEvent);
 
-          // Parse progress: [download]  45.0% of 10.00MiB at 2.50MiB/s ETA 00:05
-          const match = line.match(/\[download\]\s+(\d+(\.\d+)?)%/);
-          if (match) {
-            const pct = parseFloat(match[1]);
-            this.update(id, { progress: pct });
+          const parsed = parseProgressLine(line);
+          if (parsed) {
+            this.update(id, { progress: parsed.percent, speedBps: parsed.speedBps, etaSeconds: parsed.etaSeconds });
           }
         });
 
@@ -700,7 +651,7 @@ class DownloadsManager extends EventEmitter {
   }
 
   private maybeRunNext() {
-    if (!this.isScheduleAllowed()) return;
+    if (!isScheduleAllowed(getServerSettings())) return;
 
     const limit = getServerSettings().maxConcurrency || 2;
 
@@ -784,7 +735,7 @@ class DownloadsManager extends EventEmitter {
 
   resume(id: string) {
     const rec = this.items.get(id);
-    if (rec && rec.status === 'paused') {
+    if (rec && (rec.status === 'paused' || rec.status === 'suspended')) {
       this.queue.push(id);
       this.update(id, { status: 'queued' });
       this.maybeRunNext();

@@ -142,13 +142,13 @@
             
             <!-- Overlay Actions -->
             <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 backdrop-blur-sm">
-              <a href={file.url} download={file.name} class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-neon-blue hover:text-white transition-colors" title="Download">
+              <a href={file.url} download={file.name} class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-neon-blue hover:text-white transition-colors" title="Download" aria-label="Download">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
               </a>
               {#if isVideo(file.name)}
-                <a href={file.url} target="_blank" class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-neon-pink hover:text-white transition-colors" title="Play">
+                <a href={file.url} target="_blank" class="btn btn-circle btn-sm bg-white text-black border-none hover:bg-neon-pink hover:text-white transition-colors" title="Play" aria-label="Play">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                   </svg>
