@@ -1,6 +1,6 @@
 import { MongoClient } from 'mongodb';
 import { MONGODB_URI, DOWNLOAD_DIR } from './config';
-import type { DownloadRecord } from './downloads';
+import type { DownloadRecord } from './download/types';
 import path from 'path';
 import fs from 'fs';
 

@@ -2,71 +2,23 @@ import { EventEmitter } from 'events';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
-import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR } from './config';
-import { getServerSettings } from './settings';
-import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload, dbDeleteByRel } from './db';
-import { parseProgressLine, isScheduleAllowed, findExistingByUrl } from './util';
+import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR } from '../config';
+import { getServerSettings } from '../settings';
+import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload, dbDeleteByRel } from '../db';
+import { parseProgressLine, isScheduleAllowed, findExistingByUrl } from '../util';
 import { spawn } from 'child_process';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
-
-// We rely on yt-dlp being available in the system (installed via Dockerfile)
-const YTDLP_BIN = 'yt-dlp';
-
-export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'suspended' | 'completed' | 'failed' | 'canceled';
-
-export type DownloadRecord = {
-  id: string;
-  url: string;
-  title?: string;
-  filename?: string;
-  filePath?: string; // absolute path
-  relPath?: string; // relative path under DOWNLOAD_DIR
-  thumbnail?: string; // may be local /files/thumbnails/<name>
-  format: 'mp3' | 'mp4' | 'webm' | 'mkv' | 'video-only';
-  quality?: string;
-  progress: number; // 0-100
-  status: DownloadStatus;
-  createdAt: number;
-  updatedAt: number;
-  size?: number; // total bytes
-  downloaded?: number; // bytes
-  speedBps?: number;
-  etaSeconds?: number;
-  error?: string;
-  filenamePattern?: string;
-  startTime?: string;
-  endTime?: string;
-  normalize?: boolean;
-  cookieContent?: string;
-  proxyUrl?: string;
-  useSponsorBlock?: boolean;
-  downloadSubtitles?: boolean;
-  rateLimit?: string;
-  organizeByUploader?: boolean;
-  splitChapters?: boolean;
-  isFavorite?: boolean;
-  downloadLyrics?: boolean;
-  videoCodec?: 'default' | 'h264' | 'hevc';
-  embedMetadata?: boolean;
-  embedThumbnail?: boolean;
-  category?: string;
-  retryCount?: number;
-  priority?: number;
-};
-
-export type DownloadEvent =
-  | { type: 'snapshot'; downloads: DownloadRecord[]; stats?: { totalBytes: number; freeBytes: number } }
-  | { type: 'update'; download: DownloadRecord }
-  | { type: 'remove'; id: string }
-  | { type: 'log'; id: string; message: string };
+import type { DownloadRecord, DownloadEvent, Format, StorageStats, VideoMetadata, PlaylistItem } from './types';
 
 type Controller = {
   process?: any;
   paused?: boolean;
 };
 
-class DownloadsManager extends EventEmitter {
+const YTDLP_BIN = 'yt-dlp';
+
+export class DownloadEngine extends EventEmitter {
   private items: Map<string, DownloadRecord> = new Map();
   private ctrls: Map<string, Controller> = new Map();
   private queue: string[] = [];
@@ -79,7 +31,6 @@ class DownloadsManager extends EventEmitter {
     if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
     const th = path.join(DOWNLOAD_DIR, 'thumbnails');
     if (!fs.existsSync(th)) fs.mkdirSync(th, { recursive: true });
-
     this.init();
   }
 
@@ -87,7 +38,6 @@ class DownloadsManager extends EventEmitter {
     try { await dbMigrateFromLegacy(); console.log('[downloads] migration complete'); } catch (e) { console.warn('[downloads] migration error', e); }
     await this.loadState();
     console.log('[downloads] loaded %d items from persistence', this.items.size);
-    // requeue items that were in progress
     for (const rec of this.items.values()) {
       if (rec.status === 'queued' || rec.status === 'downloading' || rec.status === 'paused') {
         rec.status = 'queued';
@@ -100,7 +50,6 @@ class DownloadsManager extends EventEmitter {
   }
 
   private initScheduler() {
-    // Check every minute
     this.scheduleTimer = setInterval(() => this.checkSchedule(), 60 * 1000);
     this.checkSchedule();
   }
@@ -108,7 +57,6 @@ class DownloadsManager extends EventEmitter {
   private checkSchedule() {
     const allowed = isScheduleAllowed(getServerSettings());
     if (allowed) {
-      // Resume all suspended items
       for (const [id, rec] of this.items.entries()) {
         if (rec.status === 'suspended') {
           console.log('[downloads] resuming suspended id=%s', id);
@@ -118,7 +66,6 @@ class DownloadsManager extends EventEmitter {
       }
       this.maybeRunNext();
     } else {
-      // Suspend all running downloads
       for (const [id, rec] of this.items.entries()) {
         if (rec.status === 'downloading') {
           console.log('[downloads] suspending id=%s due to schedule', id);
@@ -136,7 +83,7 @@ class DownloadsManager extends EventEmitter {
     if (days <= 0) return;
     console.log('[downloads] scheduling cleanup every 1h, retention=%d days', days);
     setInterval(() => this.cleanup(), 60 * 60 * 1000);
-    this.cleanup(); // run once on startup
+    this.cleanup();
   }
 
   private async cleanup() {
@@ -157,21 +104,14 @@ class DownloadsManager extends EventEmitter {
       if (!rec) continue;
       console.log('[downloads] auto-cleanup deleting id=%s file=%s', id, rec.relPath);
 
-      // Delete file
       if (rec.filePath && fs.existsSync(rec.filePath)) {
         try { fs.unlinkSync(rec.filePath); } catch (e) { console.warn('failed to delete file', e); }
       }
-      // Delete metadata json
       if (rec.relPath) {
         const metaPath = path.join(DOWNLOAD_DIR, rec.relPath.replace(/\.[^/.]+$/, '') + '.json');
         if (fs.existsSync(metaPath)) try { fs.unlinkSync(metaPath); } catch { }
       }
-      // Delete thumbnail if local
       if (rec.thumbnail && rec.thumbnail.startsWith('/files/')) {
-        const thumbPath = path.join(process.cwd(), rec.thumbnail.replace(/^\/files\//, 'download/')); // rough mapping
-        // actually thumbnail path logic is a bit custom in cacheThumbnail, let's just try best effort or ignore for now
-        // The thumbnail path in record is like /files/thumbnails/xyz.jpg
-        // The actual path is download/thumbnails/xyz.jpg
         const localThumb = path.join(DOWNLOAD_DIR, 'thumbnails', path.basename(rec.thumbnail));
         if (fs.existsSync(localThumb)) try { fs.unlinkSync(localThumb); } catch { }
       }
@@ -186,11 +126,15 @@ class DownloadsManager extends EventEmitter {
     return Array.from(this.items.values()).sort((a, b) => b.createdAt - a.createdAt);
   }
 
+  getById(id: string): DownloadRecord | undefined {
+    return this.items.get(id);
+  }
+
   snapshot() {
     this.emit('event', { type: 'snapshot', downloads: this.list(), stats: this.getStats() } satisfies DownloadEvent);
   }
 
-  getStats() {
+  getStats(): StorageStats {
     let totalBytes = 0;
     let freeBytes = 0;
     try {
@@ -211,16 +155,14 @@ class DownloadsManager extends EventEmitter {
     return { totalBytes, freeBytes };
   }
 
-  public async getPlaylistItems(url: string): Promise<{ url: string; title: string; duration?: number; thumbnail?: string }[]> {
+  async getPlaylistItems(url: string): Promise<PlaylistItem[]> {
     return new Promise((resolve, reject) => {
-      // --flat-playlist: do not download videos
-      // --dump-single-json: output one JSON with "entries" array
       const args = ['--flat-playlist', '--dump-single-json', url];
       const proc = spawn(YTDLP_BIN, args);
       let stdout = '';
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
       proc.on('close', (code) => {
-        if (code !== 0) return resolve([]); // Not a playlist or error, treat as single
+        if (code !== 0) return resolve([]);
         try {
           const data = JSON.parse(stdout);
           if (data._type === 'playlist' && Array.isArray(data.entries)) {
@@ -243,17 +185,13 @@ class DownloadsManager extends EventEmitter {
     return findExistingByUrl(Array.from(this.items.values()), url);
   }
 
-  async enqueue(input: { url: string; format?: 'mp3' | 'mp4' | 'webm' | 'mkv' | 'video-only'; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean; downloadLyrics?: boolean; videoCodec?: 'default' | 'h264' | 'hevc'; embedMetadata?: boolean; embedThumbnail?: boolean; category?: string; processPlaylist?: boolean }): Promise<DownloadRecord[]> {
-    // Check if playlist (only if not explicitly targeting a single video ID which usually doesn't have list= param, but let's just check)
-    // Optimization: only check if URL contains 'list='
+  async enqueue(input: { url: string; format?: Format; quality?: string; filenamePattern?: string; startTime?: string; endTime?: string; normalize?: boolean; cookieContent?: string; proxyUrl?: string; useSponsorBlock?: boolean; downloadSubtitles?: boolean; rateLimit?: string; organizeByUploader?: boolean; splitChapters?: boolean; downloadLyrics?: boolean; videoCodec?: 'default' | 'h264' | 'hevc'; embedMetadata?: boolean; embedThumbnail?: boolean; category?: string; processPlaylist?: boolean }): Promise<DownloadRecord[]> {
     if (input.url.includes('list=') && input.processPlaylist !== false) {
       const items = await this.getPlaylistItems(input.url);
       if (items.length > 0) {
         console.log('[downloads] expanding playlist with %d items', items.length);
         const records: DownloadRecord[] = [];
         for (const item of items) {
-          // Recursively enqueue (but itemUrl won't have list= usually, or we strip it)
-          // We must ensure we don't loop. getPlaylistItems returns video URLs.
           const [single] = await this.enqueue({ ...input, url: item.url });
           records.push(single);
         }
@@ -313,8 +251,7 @@ class DownloadsManager extends EventEmitter {
     this.update(id, { priority });
   }
 
-
-  public async getMetadata(url: string): Promise<{ title: string; thumbnail?: string; duration?: number; description?: string; uploader?: string; id?: string }> {
+  getMetadata(url: string): Promise<VideoMetadata> {
     return new Promise((resolve, reject) => {
       const proc = spawn(YTDLP_BIN, ['--dump-json', url]);
       let stdout = '';
@@ -390,26 +327,19 @@ class DownloadsManager extends EventEmitter {
       console.log('[downloads] run start id=%s', id);
       this.update(id, { status: 'downloading', progress: 0, error: undefined });
 
-      // Feature 8: Cookie Support
       if (rec.cookieContent) {
         cookiePath = path.join(DOWNLOAD_DIR, `cookies-${id}.txt`);
         fs.writeFileSync(cookiePath, rec.cookieContent);
       }
 
-      // 1. Get Metadata
       let meta;
       try {
-        // Pass cookies to metadata fetch if available
-        // Note: getMetadata spawns a new process, we might need to update it to accept args or just rely on basic metadata
-        // For now, let's assume basic metadata works without cookies or we accept failure.
-        // Ideally we should pass cookies to getMetadata too.
         meta = await this.getMetadata(rec.url);
       } catch (e) {
         console.warn('[downloads] metadata failed, using defaults', e);
         meta = { title: 'download-' + id.slice(0, 8) };
       }
 
-      // Feature 17: File Renaming Patterns
       let baseName = rec.filenamePattern || '{title}';
       baseName = baseName
         .replace('{title}', meta.title)
@@ -421,7 +351,6 @@ class DownloadsManager extends EventEmitter {
       const ext = rec.format === 'mp3' ? 'mp3' : rec.format;
       const filename = `${safeTitle}.${ext}`;
 
-      // Feature 33: Folder Organization
       let targetDir = DOWNLOAD_DIR;
       if (rec.organizeByUploader && meta.uploader) {
         const safeUploader = meta.uploader.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 50);
@@ -432,7 +361,6 @@ class DownloadsManager extends EventEmitter {
       const absPath = path.join(targetDir, filename);
       const relPath = path.relative(DOWNLOAD_DIR, absPath);
 
-      // Cache thumbnail
       const thumbLocal = await this.cacheThumbnail(meta.title, meta.thumbnail);
       this.update(id, {
         title: meta.title,
@@ -442,33 +370,24 @@ class DownloadsManager extends EventEmitter {
         relPath
       });
 
-      // 2. Download
       await new Promise<void>((resolve, reject) => {
-        const args = ['--newline', '--no-colors']; // simplified output
+        const args = ['--newline', '--no-colors'];
 
         if (rec.format === 'mp3') {
           args.push('-x', '--audio-format', 'mp3');
-          // Audio quality control (Feature #5)
           if (rec.quality && rec.quality !== 'highest') {
-            // map '128', '192', '320' to --audio-quality
-            // yt-dlp --audio-quality: 0 (best) to 9 (worst) or specific bitrate like 128K
             args.push('--audio-quality', rec.quality + 'K');
           }
         } else if (rec.format === 'video-only') {
-          // Feature 19: Video Only (Muted)
-          // Download best video only
           let formatSpec = 'bv';
           if (rec.quality && rec.quality !== 'highest') {
             formatSpec = `bv[height<=${rec.quality}]`;
           }
           args.push('-f', formatSpec);
-          // Ensure container is mp4 or mkv
           args.push('--merge-output-format', 'mp4');
         } else {
-          // Video resolution control (Feature #4)
           let formatSpec = 'bv*+ba/b';
           if (rec.quality && rec.quality !== 'highest') {
-            // e.g. quality='1080' -> height<=1080
             formatSpec = `bv*[height<=${rec.quality}]+ba/b[height<=${rec.quality}]`;
           }
           args.push('-f', formatSpec);
@@ -477,17 +396,14 @@ class DownloadsManager extends EventEmitter {
 
         args.push('-o', absPath);
 
-        // Feature #11: Metadata Tagging
-        if (rec.embedMetadata !== false) { // Default to true if undefined
+        if (rec.embedMetadata !== false) {
           args.push('--add-metadata');
         }
 
-        // Feature 15: Thumbnail Embedding
-        if (rec.embedThumbnail !== false) { // Default to true if undefined
+        if (rec.embedThumbnail !== false) {
           args.push('--embed-thumbnail');
         }
 
-        // Feature 12: Video Trimming
         if (rec.startTime || rec.endTime) {
           const start = rec.startTime || '';
           const end = rec.endTime || '';
@@ -495,43 +411,35 @@ class DownloadsManager extends EventEmitter {
           args.push('--force-keyframes-at-cuts');
         }
 
-        // Feature 13: Volume Normalization
         if (rec.normalize) {
           args.push('--postprocessor-args', 'ffmpeg:-af loudnorm=I=-16:TP=-1.5:LRA=11');
         }
 
-        // Feature 8: Cookies
         if (cookiePath) {
           args.push('--cookies', cookiePath);
         }
 
-        // Feature 9: Proxy
         if (rec.proxyUrl) {
           args.push('--proxy', rec.proxyUrl);
         }
 
-        // Feature 10: Custom User Agent
         const ua = getServerSettings().userAgent;
         if (ua) {
           args.push('--user-agent', ua);
         }
 
-        // Feature 16: SponsorBlock
         if (rec.useSponsorBlock) {
           args.push('--sponsorblock-remove', 'all');
         }
 
-        // Feature 3: Subtitles
         if (rec.downloadSubtitles) {
           args.push('--write-subs', '--write-auto-subs', '--sub-lang', 'en,.*', '--embed-subs');
         }
 
-        // Feature 18: Lyrics
         if (rec.downloadLyrics) {
           args.push('--write-lyrics');
         }
 
-        // Feature 20: Video Codec Preference
         if (rec.videoCodec && rec.videoCodec !== 'default') {
           if (rec.videoCodec === 'h264') {
             args.push('-S', 'vcodec:h264');
@@ -540,33 +448,16 @@ class DownloadsManager extends EventEmitter {
           }
         }
 
-        // Feature 47: Rate Limit
         if (rec.rateLimit) {
           args.push('--limit-rate', rec.rateLimit);
         }
 
-        // Feature 14: Chapter Splitting
         if (rec.splitChapters) {
           args.push('--split-chapters');
-          // When splitting chapters, yt-dlp creates multiple files.
-          // The output template needs to handle this, usually by appending chapter info.
-          // We might need to adjust -o to include chapter index/title.
-          // For now, let's just append chapter info to the filename template if not present.
-          // Actually, if we use -o with a fixed filename, yt-dlp might overwrite or fail.
-          // Let's modify the output template for chapters.
-          // We need to remove the fixed filename and use a template that includes chapter info.
-          // But we already resolved `absPath`.
-          // If splitChapters is on, we should probably use a directory output or a template.
-          // Let's try to append ` - %(section_number)03d - %(section_title)s` to the output template.
-          // But `absPath` is fully resolved.
-          // We need to change `args` to use a template instead of `absPath` if splitting.
-          // Let's just append to the path before extension.
           const dir = path.dirname(absPath);
           const name = path.basename(absPath, path.extname(absPath));
-          const ext = path.extname(absPath);
-          // Override -o
-          const newOutput = path.join(dir, `${name} - %(section_number)03d - %(section_title)s${ext}`);
-          // Remove the previous -o
+          const ext2 = path.extname(absPath);
+          const newOutput = path.join(dir, `${name} - %(section_number)03d - %(section_title)s${ext2}`);
           const oIndex = args.indexOf('-o');
           if (oIndex >= 0) {
             args[oIndex + 1] = newOutput;
@@ -590,7 +481,6 @@ class DownloadsManager extends EventEmitter {
         });
 
         proc.stderr.on('data', (d) => {
-          // yt-dlp sends some info to stderr
           const line = d.toString();
           if (!line.includes('WARNING')) console.log(`[yt-dlp stderr] ${line.trim()}`);
         });
@@ -602,7 +492,6 @@ class DownloadsManager extends EventEmitter {
         });
       });
 
-      // 3. Finalize
       const metadata = {
         title: meta.title,
         thumbnail: thumbLocal || meta.thumbnail,
@@ -612,9 +501,8 @@ class DownloadsManager extends EventEmitter {
 
       this.update(id, { status: 'completed', progress: 100 });
 
-      // Feature 46: Cloud Sync
       try {
-        const { uploadToCloud } = await import('./cloud');
+        const { uploadToCloud } = await import('../cloud');
         await uploadToCloud(absPath, relPath);
       } catch (e) {
         console.error('[downloads] cloud sync failed', e);
@@ -625,16 +513,14 @@ class DownloadsManager extends EventEmitter {
       const msg = e?.message || String(e);
       console.error('[downloads] run error id=%s:', id, e);
 
-      // Feature 29: Auto-Retry
-      const rec = this.items.get(id);
+      const rec2 = this.items.get(id);
       const maxRetries = getServerSettings().maxRetries || 0;
 
-      if (rec && (rec.retryCount || 0) < maxRetries) {
-        const nextRetry = (rec.retryCount || 0) + 1;
+      if (rec2 && (rec2.retryCount || 0) < maxRetries) {
+        const nextRetry = (rec2.retryCount || 0) + 1;
         console.log('[downloads] auto-retry id=%s attempt=%d/%d', id, nextRetry, maxRetries);
         this.update(id, { status: 'queued', retryCount: nextRetry, error: `Retrying (${nextRetry}/${maxRetries})... ${msg}` });
         this.queue.push(id);
-        // Don't send webhook yet
       } else {
         this.update(id, { status: 'failed', error: msg });
         this.sendWebhook(this.items.get(id)!);
@@ -656,7 +542,6 @@ class DownloadsManager extends EventEmitter {
     const limit = getServerSettings().maxConcurrency || 2;
 
     while (this.running < limit && this.queue.length) {
-      // Find highest priority item
       let bestIdx = 0;
       let bestPriority = -Infinity;
       let bestCreatedAt = Infinity;
@@ -666,7 +551,6 @@ class DownloadsManager extends EventEmitter {
         const rec = this.items.get(id);
         if (!rec) continue;
         const p = rec.priority || 0;
-        // Higher priority first, then older createdAt
         if (p > bestPriority || (p === bestPriority && rec.createdAt < bestCreatedAt)) {
           bestPriority = p;
           bestCreatedAt = rec.createdAt;
@@ -759,15 +643,13 @@ class DownloadsManager extends EventEmitter {
     }
   }
 
-  async delete(ids: string[]) {
+  async deleteDownloads(ids: string[]) {
     for (const id of ids) {
       const rec = this.items.get(id);
       if (!rec) continue;
 
-      // Stop if running
       this.cancel(id);
 
-      // Delete files
       if (rec.filePath && fs.existsSync(rec.filePath)) {
         try { fs.unlinkSync(rec.filePath); } catch { }
       }
@@ -775,7 +657,6 @@ class DownloadsManager extends EventEmitter {
         const metaPath = path.join(DOWNLOAD_DIR, rec.relPath.replace(/\.[^/.]+$/, '') + '.json');
         if (fs.existsSync(metaPath)) try { fs.unlinkSync(metaPath); } catch { }
       }
-      // Delete thumbnail if local
       if (rec.thumbnail && rec.thumbnail.startsWith('/files/')) {
         const localThumb = path.join(DOWNLOAD_DIR, 'thumbnails', path.basename(rec.thumbnail));
         if (fs.existsSync(localThumb)) try { fs.unlinkSync(localThumb); } catch { }
@@ -788,5 +669,5 @@ class DownloadsManager extends EventEmitter {
   }
 }
 
-export const downloadsManager = new DownloadsManager();
+export const engine = new DownloadEngine();
 console.log('[downloads] using yt-dlp via spawn');

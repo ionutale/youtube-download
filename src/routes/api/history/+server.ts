@@ -1,11 +1,12 @@
 import { json } from '@sveltejs/kit';
-import { downloadsManager } from '$lib/server/downloads';
+import { list } from '$lib/server/download/queries';
+import { deleteDownloads } from '$lib/server/download/commands';
 import path from 'path';
 import fs from 'fs';
 import { DOWNLOAD_DIR } from '$lib/server/config';
 
 export async function GET() {
-  const items = downloadsManager.list().filter(d => d.status === 'completed');
+  const items = list({ status: 'completed' });
   return json(items);
 }
 
@@ -15,13 +16,13 @@ export async function DELETE({ url, request }) {
   const all = url.searchParams.get('all') === 'true';
   
   if (all) {
-    const allItems = downloadsManager.list().filter(d => d.status === 'completed' || d.status === 'failed' || d.status === 'canceled');
-    downloadsManager.delete(allItems.map(d => d.id));
+    const allItems = list({ status: ['completed', 'failed', 'canceled'] });
+    await deleteDownloads(allItems.map(d => d.id));
     return new Response(null, { status: 204 });
   }
 
   if (id) {
-    downloadsManager.delete([id]);
+    await deleteDownloads([id]);
     return new Response(null, { status: 204 });
   }
 
@@ -29,7 +30,7 @@ export async function DELETE({ url, request }) {
   try {
     const body = await request.json();
     if (body.ids && Array.isArray(body.ids)) {
-      downloadsManager.delete(body.ids);
+      await deleteDownloads(body.ids);
       return new Response(null, { status: 204 });
     }
   } catch {}

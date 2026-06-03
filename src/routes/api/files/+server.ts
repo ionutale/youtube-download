@@ -1,11 +1,11 @@
 import { json } from '@sveltejs/kit';
-import { downloadsManager } from '$lib/server/downloads';
+import { list } from '$lib/server/download/queries';
 import fs from 'fs';
 
 export async function GET() {
   try {
-    const files = downloadsManager.list()
-      .filter(d => d.status === 'completed' && d.filePath && fs.existsSync(d.filePath))
+    const files = list({ status: 'completed' })
+      .filter(d => d.filePath && fs.existsSync(d.filePath))
       .map(d => {
         let size = d.size || 0;
         let mtime = new Date(d.updatedAt);

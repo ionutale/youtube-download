@@ -1,7 +1,9 @@
 import { json } from '@sveltejs/kit';
 import fs from 'fs';
 import path from 'path';
-import { downloadsManager } from '$lib/server/downloads';
+import { checkExists } from '$lib/server/download/queries';
+import { getVideoMetadata } from '$lib/server/download/meta';
+import { enqueue, deleteDownloads } from '$lib/server/download/commands';
 import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR } from '$lib/server/config';
 import { isValidUrl } from '$lib/server/util';
 
@@ -10,7 +12,7 @@ export async function GET({ url }) {
 	const check = url.searchParams.get('check');
 	
 	if (check === 'true' && videoUrl) {
-		const existing = downloadsManager.checkExists(videoUrl);
+		const existing = checkExists(videoUrl);
 		return json({ exists: !!existing, id: existing?.id });
 	}
 
@@ -21,7 +23,7 @@ export async function GET({ url }) {
 		return json({ error: 'Invalid URL' }, { status: 400 });
 	}
 	try {
-		const info = await downloadsManager.getMetadata(videoUrl);
+		const info = await getVideoMetadata(videoUrl);
 		const title = info.title;
 		const thumbnails = info.thumbnail ? [{ url: info.thumbnail }] : [];
 		console.log('[GET /api/download] info ok title=%s', title);
@@ -37,7 +39,7 @@ export async function DELETE({ request }) {
 	const ids = body.ids;
 	if (!Array.isArray(ids)) return json({ error: 'ids array required' }, { status: 400 });
 	
-	downloadsManager.delete(ids);
+	await deleteDownloads(ids);
 	return json({ success: true });
 }
 
@@ -72,8 +74,8 @@ export async function POST({ request }) {
 	}
 
 	try {
-		const records = await downloadsManager.enqueue({ 
-			url: videoUrl, format, quality, filenamePattern, startTime, endTime, normalize,
+		const records = await enqueue(videoUrl, { 
+			format, quality, filenamePattern, startTime, endTime, normalize,
 			cookieContent, proxyUrl, useSponsorBlock, downloadSubtitles, rateLimit,
 			organizeByUploader, splitChapters, downloadLyrics, videoCodec,
 			embedMetadata, embedThumbnail, category, processPlaylist

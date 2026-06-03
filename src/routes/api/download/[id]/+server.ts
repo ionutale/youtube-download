@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { downloadsManager } from '$lib/server/downloads';
+import { pause, resume, cancel, retry, toggleFavorite, setPriority, deleteDownloads } from '$lib/server/download/commands';
 
 export async function PATCH({ params, request }) {
   const id = params.id;
@@ -9,24 +9,24 @@ export async function PATCH({ params, request }) {
   if (!id) return json({ error: 'ID required' }, { status: 400 });
 
   if (action === 'pause') {
-    downloadsManager.pause(id);
+    pause(id);
     return json({ success: true });
   } else if (action === 'resume') {
-    downloadsManager.resume(id);
+    resume(id);
     return json({ success: true });
   } else if (action === 'cancel') {
-    downloadsManager.cancel(id);
+    cancel(id);
     return json({ success: true });
   } else if (action === 'retry') {
-    const rec = await downloadsManager.retry(id);
+    const rec = await retry(id);
     return json({ success: true, id: rec?.id });
   } else if (action === 'favorite') {
-    downloadsManager.toggleFavorite(id);
+    toggleFavorite(id);
     return json({ success: true });
   } else if (action === 'setPriority') {
     const priority = body.priority;
     if (typeof priority === 'number') {
-      downloadsManager.setPriority(id, priority);
+      setPriority(id, priority);
       return json({ success: true });
     }
   }
@@ -38,6 +38,6 @@ export async function DELETE({ params }) {
   const id = params.id;
   if (!id) return json({ error: 'ID required' }, { status: 400 });
   
-  downloadsManager.delete([id]);
+  await deleteDownloads([id]);
   return json({ success: true });
 }

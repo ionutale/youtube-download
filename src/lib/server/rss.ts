@@ -1,5 +1,6 @@
 import { getServerSettings, updateServerSettings } from './settings';
-import { downloadsManager } from './downloads';
+import { checkExists } from './download/queries';
+import { enqueue } from './download/commands';
 import Parser from 'rss-parser';
 
 const parser = new Parser();
@@ -34,12 +35,11 @@ export async function checkFeed(url: string) {
     for (const item of items) {
       if (item.link && (item.link.includes('youtube.com') || item.link.includes('youtu.be'))) {
         // Check if already downloaded
-        const exists = downloadsManager.checkExists(item.link);
+        const exists = checkExists(item.link);
         if (!exists) {
           console.log(`[RSS] Found new video: ${item.title}`);
-          await downloadsManager.enqueue({
-            url: item.link,
-            format: 'mp4', // Default
+          await enqueue(item.link, {
+            format: 'mp4',
             quality: 'highest',
             category: 'RSS'
           });

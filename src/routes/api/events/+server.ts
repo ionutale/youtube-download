@@ -1,12 +1,10 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { downloadsManager } from '$lib/server/downloads';
+import { list } from '$lib/server/download/queries';
+import { subscribe } from '$lib/server/download/events';
 
 export const GET: RequestHandler = async (event) => {
-  let heartbeat: NodeJS.Timeout | undefined;
-  let listener: ((evt: any) => void) | undefined;
-  let abortHandler: (() => void) | undefined;
+  console.log('[GET /api/events] client connected');
 
-    console.log('[GET /api/events] client connected');
   const stream = new ReadableStream<string>({
     start(controller) {
       const send = (data: any) => {
@@ -17,13 +15,11 @@ export const GET: RequestHandler = async (event) => {
         }
       };
 
-      listener = (evt: any) => send(evt);
-      downloadsManager.on('event', listener);
+      send({ type: 'snapshot', downloads: list() });
 
-      // Initial snapshot
-      send({ type: 'snapshot', downloads: downloadsManager.list() });
+      const unsub = subscribe((evt) => send(evt));
 
-      heartbeat = setInterval(() => {
+      const heartbeat = setInterval(() => {
         try {
           controller.enqueue(`: ping\n\n`);
         } catch {
@@ -31,18 +27,15 @@ export const GET: RequestHandler = async (event) => {
         }
       }, 15000);
 
-      abortHandler = () => {
-        try {
-          controller.close();
-        } catch {}
-      };
-      event.request.signal.addEventListener('abort', abortHandler);
+      event.request.signal.addEventListener('abort', () => {
+        clearInterval(heartbeat);
+        unsub();
+        try { controller.close(); } catch {}
+        console.log('[GET /api/events] client disconnected');
+      });
     },
     cancel() {
-      if (heartbeat) clearInterval(heartbeat);
-      if (listener) downloadsManager.off('event', listener);
-      if (abortHandler) event.request.signal.removeEventListener('abort', abortHandler);
-        console.log('[GET /api/events] client disconnected');
+      // cleanup handled in abort handler
     }
   });
 

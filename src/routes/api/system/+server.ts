@@ -1,12 +1,12 @@
 import { json } from '@sveltejs/kit';
-import { downloadsManager } from '$lib/server/downloads';
+import { getStats } from '$lib/server/download/queries';
 import { getServerSettings, updateServerSettings } from '$lib/server/settings';
 import { DOWNLOAD_DIR } from '$lib/server/config';
 import os from 'os';
 import path from 'path';
 
 export async function GET() {
-  const stats = downloadsManager.getStats();
+  const stats = getStats();
   const settings = getServerSettings();
   
   const system = {

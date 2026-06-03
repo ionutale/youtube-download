@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { sanitizeName, parseProgressLine, isScheduleAllowed, findExistingByUrl, isValidUrl } from './util';
-import type { DownloadRecord } from './downloads';
+import type { DownloadRecord } from './download/types';
 
 describe('sanitizeName', () => {
   it('replaces illegal chars and trims length', () => {
