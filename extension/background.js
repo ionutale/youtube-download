@@ -88,7 +88,12 @@ async function uploadChunk(session, index, data, isFinal, pageUrl, title) {
 }
 
 function startRecording(tabId, pageUrl, title) {
+  if (state === STATE.RECORDING) return;
+
   chrome.tabCapture.capture({ audio: true, video: true }, (capturedStream) => {
+    if (chrome.runtime.lastError) {
+      console.error('[background] tabCapture error:', chrome.runtime.lastError.message);
+    }
     if (!capturedStream) {
       chrome.notifications.create({
         type: 'basic',
@@ -146,13 +151,14 @@ function setBadge(mode) {
     chrome.action.setBadgeBackgroundColor({ color: '#00cc00' });
   } else {
     chrome.action.setBadgeText({ text: '' });
+    chrome.action.setBadgeBackgroundColor({ color: '#000000' });
   }
 }
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   currentTabId = tabId;
   detectedData = null;
-  setBadge('');
+  if (state !== STATE.RECORDING) setBadge('');
 });
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
@@ -174,6 +180,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
     id: 'sendPageToDownloader',
     title: 'Send this page to downloader',
