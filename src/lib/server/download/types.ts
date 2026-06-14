@@ -40,6 +40,7 @@ export interface DownloadRecord {
   category?: string;
   retryCount?: number;
   priority?: number;
+  source?: 'manual' | 'extension-capture' | 'extension-recording';
 }
 
 export type DownloadEvent =
