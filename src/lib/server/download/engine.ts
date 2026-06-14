@@ -120,6 +120,11 @@ export class DownloadEngine extends EventEmitter {
       if (rec.relPath) await dbDeleteByRel(rec.relPath);
       this.emit('event', { type: 'remove', id } satisfies DownloadEvent);
     }
+
+    try {
+      const { cleanupStaleRecordings } = await import('../upload');
+      cleanupStaleRecordings();
+    } catch { }
   }
 
   list(): DownloadRecord[] {
@@ -249,6 +254,12 @@ export class DownloadEngine extends EventEmitter {
 
   setPriority(id: string, priority: number) {
     this.update(id, { priority });
+  }
+
+  addDownload(record: DownloadRecord): void {
+    this.items.set(record.id, record);
+    this.emit('event', { type: 'update', download: record } satisfies DownloadEvent);
+    this.saveStateDebounced();
   }
 
   getMetadata(url: string): Promise<VideoMetadata> {
