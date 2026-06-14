@@ -179,6 +179,36 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   }
 });
 
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'getPopupStatus') {
+    sendResponse(detectedData);
+    return true;
+  }
+
+  if (msg.type === 'captureStream' && msg.data) {
+    const { url, pageUrl, title } = msg.data;
+    state = STATE.DOWNLOADING;
+    sendToServer(url, pageUrl, title);
+    return true;
+  }
+
+  if (msg.type === 'startRecording' && msg.data) {
+    const { pageUrl, title, tabId } = msg.data;
+    const targetTabId = tabId || currentTabId;
+    if (targetTabId) {
+      chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+        startRecording(tab?.id || targetTabId, pageUrl || tab?.url, title || tab?.title);
+      });
+    }
+    return true;
+  }
+
+  if (msg.type === 'stopRecording') {
+    stopRecording();
+    return true;
+  }
+});
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
