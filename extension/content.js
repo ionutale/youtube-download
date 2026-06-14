@@ -1,5 +1,7 @@
 let detectedStreams = [];
 let videoInfo = { count: 0, hasVideo: false };
+let perfObserver = null;
+let domObserver = null;
 
 function scanForVideoElements() {
   const videos = document.querySelectorAll('video');
@@ -22,49 +24,64 @@ function scanForStreams() {
       }
     }
   } catch (e) {
+    console.warn('[content] scanForStreams failed:', e);
   }
 }
 
 function sendStatus() {
-  chrome.runtime.sendMessage({
-    type: 'videoDetected',
-    data: {
-      pageUrl: window.location.href,
-      pageTitle: document.title,
-      siteName: document.querySelector('meta[property="og:site_name"]')?.content ||
-                document.querySelector('meta[name="application-name"]')?.content ||
-                new URL(window.location.href).hostname,
-      hasVideo: videoInfo.hasVideo,
-      videoCount: videoInfo.count,
-      streams: detectedStreams.slice(0, 10)
-    }
-  });
+  try {
+    chrome.runtime.sendMessage({
+      type: 'videoDetected',
+      data: {
+        pageUrl: window.location.href,
+        pageTitle: document.title,
+        siteName: document.querySelector('meta[property="og:site_name"]')?.content ||
+                  document.querySelector('meta[name="application-name"]')?.content ||
+                  new URL(window.location.href).hostname,
+        hasVideo: videoInfo.hasVideo,
+        videoCount: videoInfo.count,
+        streams: detectedStreams.slice(0, 10)
+      }
+    });
+  } catch (e) {
+    // Extension context may have been invalidated
+  }
 }
+
+if (typeof PerformanceObserver !== 'undefined') {
+  perfObserver = new PerformanceObserver((list) => {
+    let changed = false;
+    for (const entry of list.getEntries()) {
+      const url = entry.name;
+      if (url.match(/\.m3u8/i) || url.match(/\.mpd/i)) {
+        if (!detectedStreams.includes(url)) {
+          detectedStreams.push(url);
+          if (detectedStreams.length > 100) detectedStreams.shift();
+          changed = true;
+        }
+      }
+    }
+    if (changed) sendStatus();
+  });
+  perfObserver.observe({ entryTypes: ['resource'] });
+}
+
+if (document.body) {
+  domObserver = new MutationObserver(() => {
+    scanForVideoElements();
+    sendStatus();
+  });
+  domObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+window.addEventListener('beforeunload', () => {
+  if (perfObserver) perfObserver.disconnect();
+  if (domObserver) domObserver.disconnect();
+});
 
 scanForVideoElements();
 scanForStreams();
 sendStatus();
-
-const observer = new PerformanceObserver((list) => {
-  let changed = false;
-  for (const entry of list.getEntries()) {
-    const url = entry.name;
-    if (url.match(/\.m3u8/i) || url.match(/\.mpd/i)) {
-      if (!detectedStreams.includes(url)) {
-        detectedStreams.push(url);
-        changed = true;
-      }
-    }
-  }
-  if (changed) sendStatus();
-});
-observer.observe({ entryTypes: ['resource'] });
-
-const domObserver = new MutationObserver(() => {
-  scanForVideoElements();
-  sendStatus();
-});
-domObserver.observe(document.body, { childList: true, subtree: true });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'getStatus') {
