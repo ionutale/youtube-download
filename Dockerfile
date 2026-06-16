@@ -4,11 +4,13 @@ ARG NODE_VERSION=22-bookworm-slim
 FROM node:${NODE_VERSION} AS builder
 WORKDIR /app
 ENV CI=1
-COPY pnpm-lock.yaml package.json ./
+COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
+COPY svelte.config.js tsconfig.json vite.config.ts eslint.config.js ./
 RUN corepack enable && corepack prepare pnpm@latest --activate
 # Fix for EAGAIN errors in Docker (filesystem locking issues)
 RUN pnpm config set package-import-method copy
-RUN pnpm install --frozen-lockfile
+# Allow build scripts for dependencies (esbuild, tailwindcss, etc.)
+RUN pnpm install --frozen-lockfile --config.ignore-scripts=false
 COPY . .
 # Build with adapter-node
 ENV SVELTE_ADAPTER=node
