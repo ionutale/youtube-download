@@ -6,7 +6,7 @@ WORKDIR /app
 ENV CI=1
 COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
 COPY svelte.config.js tsconfig.json vite.config.ts eslint.config.js ./
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@11.1.2 --activate
 # Fix for EAGAIN errors in Docker (filesystem locking issues)
 RUN pnpm config set package-import-method copy
 # Allow build scripts for dependencies (esbuild, tailwindcss, etc.)
@@ -25,7 +25,7 @@ ENV HOST=0.0.0.0
 ENV SVELTE_ADAPTER=node
 ENV DOWNLOAD_DIR=/data
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@11.1.2 --activate
 
 # Install runtime tools: ffmpeg, curl (for healthcheck & downloading yt-dlp), ca-certificates, and atomicparsley (for metadata)
 RUN apt-get update \
