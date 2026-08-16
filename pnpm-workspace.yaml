@@ -61,3 +61,5 @@ minimumReleaseAgeExclude:
   - nanoid@3.3.18
   - postcss@8.5.18
   - vitest@3.2.6
+patchedDependencies:
+  cookie@0.6.0: patches/cookie@0.6.0.patch
