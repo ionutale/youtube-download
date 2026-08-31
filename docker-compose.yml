@@ -14,10 +14,14 @@ services:
       - HOST=0.0.0.0
       - SVELTE_ADAPTER=node
       - DOWNLOAD_DIR=/data
+      - MONGODB_URI=mongodb://root:password@mongo:27017
     ports:
       - "3000:3000"
     volumes:
       - ./download:/data
+    depends_on:
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
 
   mongo:
@@ -31,6 +35,12 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: password
     volumes:
       - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   mongodb_data:

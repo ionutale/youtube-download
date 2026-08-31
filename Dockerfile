@@ -40,9 +40,12 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml ./
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/node_modules ./node_modules
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod a+rx /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3000
 VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "build"]
