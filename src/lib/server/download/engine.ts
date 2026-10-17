@@ -5,7 +5,7 @@ import fs from 'fs';
 import { DEFAULT_FORMAT, DEFAULT_QUALITY, DOWNLOAD_DIR } from '../config';
 import { getServerSettings } from '../settings';
 import { dbLoadDownloads, dbMigrateFromLegacy, dbUpsertDownload, dbDeleteByRel } from '../db';
-import { parseProgressLine, isScheduleAllowed, findExistingByUrl } from '../util';
+import { parseProgressLine, isScheduleAllowed, findExistingByUrl, stripPlaylistParams } from '../util';
 import { spawn } from 'child_process';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
@@ -161,12 +161,21 @@ export class DownloadEngine extends EventEmitter {
   }
 
   async getPlaylistItems(url: string): Promise<PlaylistItem[]> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const args = ['--flat-playlist', '--dump-single-json', url];
       const proc = spawn(YTDLP_BIN, args);
       let stdout = '';
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        proc.kill('SIGKILL');
+        console.warn('[downloads] playlist fetch timed out for %s', url);
+        resolve([]);
+      }, 60_000);
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
       proc.on('close', (code) => {
+        clearTimeout(timer);
+        if (settled) return;
         if (code !== 0) return resolve([]);
         try {
           const data = JSON.parse(stdout);
@@ -204,12 +213,16 @@ export class DownloadEngine extends EventEmitter {
       }
     }
 
+    // Single-video download: strip playlist params so yt-dlp fetches only this
+    // video instead of paginating the whole radio/mix playlist.
+    const downloadUrl = stripPlaylistParams(input.url);
+
     const id = crypto.randomUUID();
     const now = Date.now();
-    console.log('[downloads] enqueue id=%s url=%s format=%s quality=%s', id, input.url, input.format || DEFAULT_FORMAT, input.quality || DEFAULT_QUALITY);
+    console.log('[downloads] enqueue id=%s url=%s format=%s quality=%s', id, downloadUrl, input.format || DEFAULT_FORMAT, input.quality || DEFAULT_QUALITY);
     const rec: DownloadRecord = {
       id,
-      url: input.url,
+      url: downloadUrl,
       format: (input.format as any) || DEFAULT_FORMAT,
       quality: input.quality || DEFAULT_QUALITY,
       filenamePattern: input.filenamePattern,
@@ -262,12 +275,28 @@ export class DownloadEngine extends EventEmitter {
     this.saveStateDebounced();
   }
 
-  getMetadata(url: string): Promise<VideoMetadata> {
+  getMetadata(url: string, trackId?: string): Promise<VideoMetadata> {
     return new Promise((resolve, reject) => {
       const proc = spawn(YTDLP_BIN, ['--dump-json', url]);
       let stdout = '';
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        proc.kill('SIGKILL');
+        if (trackId) this.ctrls.delete(trackId);
+        reject(new Error('yt-dlp metadata fetch timed out'));
+      }, 60_000);
+      if (trackId) this.ctrls.set(trackId, { process: proc });
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.on('error', (e) => {
+        clearTimeout(timer);
+        if (trackId) this.ctrls.delete(trackId);
+        if (!settled) reject(e);
+      });
       proc.on('close', (code) => {
+        clearTimeout(timer);
+        if (trackId) this.ctrls.delete(trackId);
+        if (settled) return;
         if (code !== 0) return reject(new Error(`yt-dlp dump-json exited with ${code}`));
         try {
           const data = JSON.parse(stdout);
@@ -345,10 +374,15 @@ export class DownloadEngine extends EventEmitter {
 
       let meta;
       try {
-        meta = await this.getMetadata(rec.url);
+        meta = await this.getMetadata(stripPlaylistParams(rec.url), id);
       } catch (e) {
         console.warn('[downloads] metadata failed, using defaults', e);
         meta = { title: 'download-' + id.slice(0, 8) };
+      }
+
+      if (this.items.get(id)?.status === 'canceled') {
+        console.log('[downloads] canceled during metadata, aborting id=%s', id);
+        return;
       }
 
       let baseName = rec.filenamePattern || '{title}';
@@ -475,19 +509,47 @@ export class DownloadEngine extends EventEmitter {
           }
         }
 
-        args.push(rec.url);
+        args.push(stripPlaylistParams(rec.url));
 
         console.log('[downloads] spawning yt-dlp', args);
         const proc = spawn(YTDLP_BIN, args);
         this.ctrls.set(id, { process: proc });
 
+        let stdoutBuffer = '';
         proc.stdout.on('data', (data) => {
-          const line = data.toString();
-          this.emit('event', { type: 'log', id, message: line } satisfies DownloadEvent);
+          stdoutBuffer += data.toString();
+          let nl = stdoutBuffer.indexOf('\n');
+          while (nl !== -1) {
+            const line = stdoutBuffer.slice(0, nl).trimEnd();
+            stdoutBuffer = stdoutBuffer.slice(nl + 1);
+            this.emit('event', { type: 'log', id, message: line + '\n' } satisfies DownloadEvent);
 
-          const parsed = parseProgressLine(line);
-          if (parsed) {
-            this.update(id, { progress: parsed.percent, speedBps: parsed.speedBps, etaSeconds: parsed.etaSeconds });
+            const parsed = parseProgressLine(line);
+            if (parsed) {
+              const current = this.items.get(id);
+              const prevProgress = current?.progress || 0;
+              this.update(id, {
+                progress: Math.max(prevProgress, parsed.percent),
+                speedBps: parsed.speedBps,
+                etaSeconds: parsed.etaSeconds
+              });
+            }
+            nl = stdoutBuffer.indexOf('\n');
+          }
+        });
+
+        proc.on('close', () => {
+          if (stdoutBuffer.trim()) {
+            const parsed = parseProgressLine(stdoutBuffer.trimEnd());
+            if (parsed) {
+              const current = this.items.get(id);
+              const prevProgress = current?.progress || 0;
+              this.update(id, {
+                progress: Math.max(prevProgress, parsed.percent),
+                speedBps: parsed.speedBps,
+                etaSeconds: parsed.etaSeconds
+              });
+            }
           }
         });
 
@@ -525,16 +587,20 @@ export class DownloadEngine extends EventEmitter {
       console.error('[downloads] run error id=%s:', id, e);
 
       const rec2 = this.items.get(id);
-      const maxRetries = getServerSettings().maxRetries || 0;
-
-      if (rec2 && (rec2.retryCount || 0) < maxRetries) {
-        const nextRetry = (rec2.retryCount || 0) + 1;
-        console.log('[downloads] auto-retry id=%s attempt=%d/%d', id, nextRetry, maxRetries);
-        this.update(id, { status: 'queued', retryCount: nextRetry, error: `Retrying (${nextRetry}/${maxRetries})... ${msg}` });
-        this.queue.push(id);
+      if (rec2?.status === 'canceled') {
+        console.log('[downloads] keeping canceled status id=%s', id);
       } else {
-        this.update(id, { status: 'failed', error: msg });
-        this.sendWebhook(this.items.get(id)!);
+        const maxRetries = getServerSettings().maxRetries || 0;
+
+        if (rec2 && (rec2.retryCount || 0) < maxRetries) {
+          const nextRetry = (rec2.retryCount || 0) + 1;
+          console.log('[downloads] auto-retry id=%s attempt=%d/%d', id, nextRetry, maxRetries);
+          this.update(id, { status: 'queued', retryCount: nextRetry, error: `Retrying (${nextRetry}/${maxRetries})... ${msg}` });
+          this.queue.push(id);
+        } else {
+          this.update(id, { status: 'failed', error: msg });
+          this.sendWebhook(this.items.get(id)!);
+        }
       }
     } finally {
       this.ctrls.delete(id);
@@ -615,7 +681,8 @@ export class DownloadEngine extends EventEmitter {
       videoCodec: rec.videoCodec,
       embedMetadata: rec.embedMetadata,
       embedThumbnail: rec.embedThumbnail,
-      category: rec.category
+      category: rec.category,
+      processPlaylist: false
     });
     return newRec;
   }

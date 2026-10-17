@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeName, parseProgressLine, isScheduleAllowed, findExistingByUrl, isValidUrl } from './util';
+import { sanitizeName, parseProgressLine, isScheduleAllowed, findExistingByUrl, isValidUrl, stripPlaylistParams } from './util';
 import type { DownloadRecord } from './download/types';
 
 describe('sanitizeName', () => {
@@ -7,6 +7,32 @@ describe('sanitizeName', () => {
     const s = sanitizeName('a:/\\*?"<>| very long name !!!!!');
     expect(s).toMatch(/^[A-Za-z0-9-_]+(?:_[A-Za-z0-9-_]+)*$/);
     expect(s.length).toBeLessThanOrEqual(120);
+  });
+});
+
+describe('stripPlaylistParams', () => {
+  it('removes list, start_radio and index params from a radio URL', () => {
+    expect(stripPlaylistParams('https://www.youtube.com/watch?v=ZSM3w1v-A_Y&list=RDZSM3w1v-A_Y&start_radio=1'))
+      .toBe('https://www.youtube.com/watch?v=ZSM3w1v-A_Y');
+  });
+
+  it('leaves plain watch URLs untouched', () => {
+    expect(stripPlaylistParams('https://www.youtube.com/watch?v=abc123'))
+      .toBe('https://www.youtube.com/watch?v=abc123');
+  });
+
+  it('removes index param but keeps other params', () => {
+    expect(stripPlaylistParams('https://www.youtube.com/watch?v=abc123&index=5&list=PLabc'))
+      .toBe('https://www.youtube.com/watch?v=abc123');
+  });
+
+  it('handles youtu.be short URLs', () => {
+    expect(stripPlaylistParams('https://youtu.be/abc123?list=RDabc123&start_radio=1'))
+      .toBe('https://youtu.be/abc123');
+  });
+
+  it('returns the URL unchanged on parse failure', () => {
+    expect(stripPlaylistParams('not a url')).toBe('not a url');
   });
 });
 
@@ -29,6 +55,36 @@ describe('parseProgressLine', () => {
   it('handles KiB/s speed unit', () => {
     const result = parseProgressLine('[download]  50.0% of 1.00MiB at 500.00KiB/s ETA 00:30');
     expect(result).toEqual({ percent: 50.0, speedBps: 500 * 1024, etaSeconds: 30 });
+  });
+
+  it('parses completion line using "in ... at ..."', () => {
+    const result = parseProgressLine('[download] 100% of 10.00MiB in 00:00:03 at 748.29KiB/s');
+    expect(result).toEqual({ percent: 100, speedBps: 748.29 * 1024, etaSeconds: 0 });
+  });
+
+  it('parses ETA with hours (HH:MM:SS)', () => {
+    const result = parseProgressLine('[download]  50.0% of 1.20GiB at 1.50MiB/s ETA 01:23:45');
+    expect(result).toEqual({ percent: 50, speedBps: 1.5 * 1024 * 1024, etaSeconds: 5025 });
+  });
+
+  it('leaves etaSeconds undefined for Unknown ETA', () => {
+    const result = parseProgressLine('[download]  10.0% of 1.00MiB at 0.00KiB/s ETA Unknown');
+    expect(result).toEqual({ percent: 10, speedBps: 0, etaSeconds: undefined });
+  });
+
+  it('parses B/s speed unit', () => {
+    const result = parseProgressLine('[download]  10.0% of 1.00MiB at 512B/s ETA 00:05');
+    expect(result).toEqual({ percent: 10, speedBps: 512, etaSeconds: 5 });
+  });
+
+  it('parses fragmented (HLS/DASH) progress line', () => {
+    const result = parseProgressLine('[download]  20.8% of ~  97.34MiB at  508.59KiB/s ETA 03:58 (frag 9/48)');
+    expect(result).toEqual({ percent: 20.8, speedBps: 508.59 * 1024, etaSeconds: 238 });
+  });
+
+  it('parses fragmented completion line', () => {
+    const result = parseProgressLine('[download] 100% of ~ 97.34MiB in 00:00:35 at 482.19KiB/s (frag 48/48)');
+    expect(result).toEqual({ percent: 100, speedBps: 482.19 * 1024, etaSeconds: 0 });
   });
 
   it('returns null for non-progress lines', () => {

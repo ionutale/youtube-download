@@ -383,6 +383,24 @@
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
+
+  function formatSpeed(bps?: number) {
+    if (!bps) return '0 B/s';
+    if (bps < 1024) return `${bps} B/s`;
+    if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
+    return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
+  }
+
+  function formatEta(seconds?: number) {
+    if (seconds === undefined) return 'Calculating...';
+    const s = Math.max(0, Math.round(seconds));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}h ${m}m left`;
+    if (m > 0) return `${m}m ${sec}s left`;
+    return `${sec}s left`;
+  }
 </script>
 
 {#if isDragging}
@@ -422,7 +440,6 @@
             <textarea
               bind:this={inputElement}
               bind:value={url}
-              on:keydown={handleKeydown}
               on:keydown={handleKeydown}
               placeholder={$t('input.placeholder')}
               class="w-full bg-transparent border-none focus:ring-0 text-[var(--text-color)] placeholder-[var(--text-muted)] px-4 py-3 text-lg min-h-[120px] resize-y"
@@ -717,16 +734,24 @@
               </div>
               
               <div class="flex items-center justify-between mt-2 text-xs text-[var(--text-muted)]">
-                <span>{download.status}</span>
+                <span>
+                  {#if download.status === 'completed'}
+                    Completed
+                  {:else if download.status === 'downloading' && download.progress >= 100}
+                    Finalizing...
+                  {:else}
+                    {download.status}
+                  {/if}
+                </span>
                 <span>{download.progress}%</span>
               </div>
               
               <!-- Speed & ETA -->
               {#if download.status === 'downloading'}
                 <div class="flex items-center gap-3 mt-1 text-xs text-neon-blue">
-                   <span>{(download.speedBps ? (download.speedBps / 1024 / 1024).toFixed(1) : 0) + ' MB/s'}</span>
-                   <span>•</span>
-                   <span>{download.etaSeconds ? download.etaSeconds + 's left' : 'Calculating...'}</span>
+                  <span class="font-mono">{formatSpeed(download.speedBps)}</span>
+                  <span>•</span>
+                  <span>{download.progress >= 100 ? 'Finalizing...' : formatEta(download.etaSeconds)}</span>
                 </div>
               {/if}
 
